@@ -213,3 +213,4 @@ function FlowHeader({active}) {
   return <div className="flow-header"><div className="flow-title"><span className="eyebrow">NAMES UNIBEN • 2026 ELECTION</span><h2>Electoral portal</h2></div><div className="flow-steps">{steps.map((s,i)=><div className={i===active?"flow-step active":i<active?"flow-step done":"flow-step"} key={s}><span>{i<active?<Check size={13}/>:i+1}</span><small>{s}</small></div>)}</div></div>;
 }
 
+export default App;
