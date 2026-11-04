@@ -1,216 +1,239 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, CircleHelp,
-  ClipboardList, LockKeyhole, Menu, ShieldCheck, Vote, X, Info, Clock3,
-  Users, BookOpen, ExternalLink, AlertCircle
-} from "lucide-react";
-import namesLogo from "./assets/names-logo.jpg";
-import unibenLogo from "./assets/uniben-logo.png";
-import { positions } from "./data";
+  ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, CalendarClock, Check, CheckCircle2,
+  ChevronDown, CircleAlert, CircleCheck, ClipboardCheck, Clock3, Fingerprint, Globe2,
+  HelpCircle, Info, KeyRound, LockKeyhole, LogOut, Mail, Menu, RefreshCw, Shield,
+  ShieldCheck, Users, Vote, X
+} from 'lucide-react';
+import namesLogo from './assets/names-logo.jpg';
+import unibenLogo from './assets/uniben-logo.png';
+import { previewVoters } from './lib/demo';
+import {
+  API_CONFIGURED, DEMO_MODE, ApiError, castVote, exchangeGoogleCode,
+  getBallot, getElection, getGoogleLoginUrl, getMe, getVoteStatus, logout,
+  previewSignIn, requestOtp, verifyOtp
+} from './lib/api';
 
-const steps = ["Verify identity", "Cast your ballot", "Review selections", "Confirmation"];
-
-function Brand({ compact = false }) {
-  return <div className="brand">
-    <img src={namesLogo} alt="NAMES logo" className="brand-logo names-logo" />
-    <div className="brand-divider" />
-    <img src={unibenLogo} alt="University of Benin logo" className="brand-logo uniben-logo" />
-    {!compact && <div className="brand-copy">
-      <strong>NAMES UNIBEN</strong>
-      <span>Electoral Portal</span>
-    </div>}
-  </div>;
+const processSteps = ['Verify identity', 'Voter dashboard', 'Cast ballot', 'Review', 'Confirmation'];
+function formatDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? null : date.toLocaleString('en-NG', {dateStyle:'medium', timeStyle:'short'});
 }
-
-function Footer() {
-  return <footer className="footer">
-    <div className="footer-inner">
-      <span>© 2026 NAMES UNIBEN. All rights reserved.</span>
-      <span className="powered"><span className="copyright-mark">©</span> <b>Vaultr Technologies</b> <span>2026</span></span>
-    </div>
-  </footer>;
+function displayError(error) {
+  if (error instanceof ApiError) return error.message;
+  return 'Something went wrong. Please try again.';
 }
-
-function App() {
-  const [page, setPage] = useState("home");
-  const [studentId, setStudentId] = useState("");
-  const [pin, setPin] = useState("");
-  const [idType, setIdType] = useState("Matriculation number");
-  const [selections, setSelections] = useState({});
-  const [activePosition, setActivePosition] = useState(0);
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-  const [error, setError] = useState("");
-  const [receipt] = useState(() => "NMS-2026-" + Math.random().toString(36).slice(2, 8).toUpperCase());
-
-  const selectedCount = Object.keys(selections).length;
-  const allSelected = selectedCount === positions.length;
-  const currentPosition = positions[activePosition];
-  const chosen = useMemo(() => positions.map(p => ({
-    ...p, candidate: p.candidates.find(c => c.id === selections[p.id])
-  })), [selections]);
-
-  const go = (next) => { setError(""); setPage(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-
-  function verify(e) {
-    e.preventDefault();
-    if (!studentId.trim() || !pin.trim()) {
-      setError("Enter your student identification number and voting PIN to continue.");
-      return;
-    }
-    // Frontend demonstration only. Production verification must be performed by a secure backend.
-    go("ballot");
-  }
-
-  function submitDemo() {
-    if (!allSelected) {
-      setError("Please make a selection for every position before continuing.");
-      go("ballot");
-      return;
-    }
-    go("success");
-  }
-
+function shortenId(str) {
+  if (!str) return 'Not available';
+  return str.length > 7 ? `${str.slice(0,3)}••••${str.slice(-3)}` : str;
+}
+function brandInitials(name = '') { return name.split(' ').filter(Boolean).slice(0,2).map(s => s[0]).join('').toUpperCase(); }
+function Brand() {
+  return <div className="brand-block"><div className="brand-logos"><img src={namesLogo} alt="NAMES association crest" className="logo-names"/><span className="brand-rule"/><img src={unibenLogo} alt="University of Benin crest" className="logo-uniben"/></div><div className="brand-text"><strong>NAMES UNIBEN</strong><small>Electoral Portal</small></div></div>;
+}
+function StatusBadge({status}) {
+  const text = status === 'open' ? 'Voting open' : status === 'upcoming' ? 'Upcoming election' : status === 'closed' ? 'Voting closed' : status === 'preview' ? 'Preview' : 'Election information';
+  return <span className={`status-pill status-${status || 'idle'}`}><span className="status-dot"/>{text}</span>;
+}
+function InfoBox({children,kind='info'}) {
+  return <div className={`info-box ${kind}`} role={kind==='error'?'alert':'note'}>{kind==='error'?<CircleAlert size={17}/>:kind==='success'?<CheckCircle2 size={17}/>:<Info size={17}/>}<div>{children}</div></div>;
+}
+function Shell({children, page, setPage, election, session, onSignOut, openHelp}) {
+  const [menuOpen,setMenuOpen]=useState(false);
+  const go = (pageName) => { setPage(pageName); setMenuOpen(false); };
   return <div className="app-shell">
-    <header className="topbar">
-      <div className="topbar-inner">
-        <button className="brand-button" onClick={() => go("home")} aria-label="Go to home"><Brand /></button>
-        <nav className={mobileMenu ? "nav-links open" : "nav-links"}>
-          <button onClick={() => go("home")}>Home</button>
-          <button onClick={() => setShowHelp(true)}>How to vote</button>
-          <button onClick={() => setShowHelp(true)}>Help & support</button>
-          <button className="nav-cta" onClick={() => go("verify")}>Access ballot <ArrowRight size={16}/></button>
-        </nav>
-        <button className="menu-toggle" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Toggle menu">
-          {mobileMenu ? <X/> : <Menu/>}
-        </button>
-      </div>
-    </header>
-
-    <div className="demo-notice"><Info size={15}/><span><b>Frontend demonstration</b> — this preview does not verify students or record real votes.</span></div>
-
-    {page === "home" && <main>
-      <section className="hero">
-        <div className="hero-content">
-          <div className="eyebrow"><span className="eyebrow-dot"/> STUDENT LEADERSHIP • 2026</div>
-          <h1>Your voice.<br/><em>Your choice.</em><br/>Our future.</h1>
-          <p className="hero-lead">The NAMES UNIBEN Electoral Portal is the official digital space for eligible students to participate in the association's elections.</p>
-          <div className="hero-actions">
-            <button className="button button-primary" onClick={() => go("verify")}>Proceed to vote <ArrowRight size={18}/></button>
-            <button className="button button-quiet" onClick={() => setShowHelp(true)}><CircleHelp size={17}/> How voting works</button>
-          </div>
-          <div className="hero-assurance"><ShieldCheck size={17}/><span>Designed for a secure, accessible and transparent voting experience.</span></div>
-        </div>
-        <div className="hero-art">
-          <div className="hero-orbit orbit-one"/><div className="hero-orbit orbit-two"/>
-          <div className="hero-card">
-            <div className="hero-card-top"><span className="mini-seal"><Vote size={21}/></span><span>THE STUDENT VOICE</span><span className="live-dot"/></div>
-            <div className="ballot-illustration">
-              <div className="ballot-sheet"><div className="sheet-head"/><div className="sheet-line"/><div className="sheet-line short"/><div className="sheet-option"><span/><i/></div><div className="sheet-option"><span/><i/></div><div className="sheet-option"><span/><i/></div></div>
-              <div className="ballot-check"><Check size={31}/></div>
-            </div>
-            <div className="hero-card-bottom"><div><b>One student</b><span>One verified ballot</span></div><div className="card-arrow"><ArrowRight/></div></div>
-          </div>
-          <div className="floating-chip chip-top"><ShieldCheck size={16}/> Identity protection</div>
-          <div className="floating-chip chip-bottom"><CheckCircle2 size={16}/> Every vote counts</div>
-        </div>
-      </section>
-
-      <section className="quick-strip">
-        <div><span className="strip-icon"><LockKeyhole/></span><div><b>Verified access</b><small>For eligible NAMES students</small></div></div>
-        <div><span className="strip-icon orange"><ClipboardList/></span><div><b>Simple ballot</b><small>Clear candidate selections</small></div></div>
-        <div><span className="strip-icon green"><ShieldCheck/></span><div><b>Election integrity</b><small>Built around fair participation</small></div></div>
-      </section>
-
-      <section className="welcome-section">
-        <div className="section-heading">
-          <span className="eyebrow">BE INFORMED. TAKE PART.</span>
-          <h2>Make your vote count.</h2>
-          <p>Participating is straightforward. Review the instructions before accessing your ballot.</p>
-        </div>
-        <div className="steps-grid">
-          <div className="step-card"><span className="step-number">01</span><div className="step-icon"><Users/></div><h3>Verify your identity</h3><p>Use your matriculation number or approved 100-level registration number together with your assigned voting PIN.</p></div>
-          <div className="step-card"><span className="step-number">02</span><div className="step-icon orange"><Vote/></div><h3>Choose your candidates</h3><p>Review the candidates and make your selection for each available electoral position.</p></div>
-          <div className="step-card"><span className="step-number">03</span><div className="step-icon green"><CheckCircle2/></div><h3>Review and submit</h3><p>Check your selections carefully before submitting your ballot. Follow the on-screen confirmation.</p></div>
-        </div>
-      </section>
-      <section className="callout">
-        <div><span className="eyebrow">YOUR ASSOCIATION. YOUR DECISION.</span><h2>Leadership begins with participation.</h2><p>Take a moment to understand the candidates, their plans and the responsibilities of each office.</p></div>
-        <button className="button button-light" onClick={() => go("verify")}>Enter the voting portal <ArrowRight size={17}/></button>
-      </section>
-    </main>}
-
-    {page === "verify" && <main className="flow-page">
-      <button className="back-link" onClick={() => go("home")}><ArrowLeft size={16}/> Back to home</button>
-      <FlowHeader active={0}/>
-      <div className="form-layout">
-        <div className="form-intro">
-          <span className="eyebrow">VOTER ACCESS</span><h1>Let's verify<br/><em>it's you.</em></h1>
-          <p>Enter the details provided to you by the NAMES Electoral Committee. Your eligibility will be checked before a ballot is issued.</p>
-          <div className="privacy-note"><LockKeyhole size={18}/><span>Your identification details should only be used for voter verification. Never share your voting PIN.</span></div>
-        </div>
-        <form className="form-card" onSubmit={verify}>
-          <div className="form-card-heading"><span className="form-icon"><ShieldCheck/></span><div><h2>Voter verification</h2><p>All fields are required</p></div></div>
-          <label className="field-label">Identification type</label>
-          <div className="select-wrap"><select value={idType} onChange={e => setIdType(e.target.value)}><option>Matriculation number</option><option>100-level registration number</option></select><ChevronDown size={17}/></div>
-          <label className="field-label" htmlFor="student-id">{idType}</label>
-          <input id="student-id" className="text-input" value={studentId} onChange={e => setStudentId(e.target.value)} placeholder={idType === "Matriculation number" ? "Enter your matric number" : "Enter your registration number"} autoComplete="off"/>
-          <label className="field-label" htmlFor="pin">Unique voting PIN</label>
-          <input id="pin" className="text-input" value={pin} onChange={e => setPin(e.target.value)} placeholder="Enter your assigned PIN" type="password" autoComplete="off"/>
-          {error && <div className="inline-error"><AlertCircle size={16}/>{error}</div>}
-          <button className="button button-primary full-button" type="submit">Verify and continue <ArrowRight size={17}/></button>
-          <p className="form-footnote"><LockKeyhole size={13}/> Your details are not sent anywhere in this frontend preview.</p>
-        </form>
-      </div>
-    </main>}
-
-    {page === "ballot" && <main className="flow-page ballot-page">
-      <button className="back-link" onClick={() => go("verify")}><ArrowLeft size={16}/> Back to verification</button>
-      <FlowHeader active={1}/>
-      <div className="ballot-heading"><div><span className="eyebrow">YOUR BALLOT</span><h1>Choose your <em>leaders.</em></h1><p>Select one candidate for each position. You can review your choices before final submission.</p></div><div className="progress-card"><b>{selectedCount} <span>/ {positions.length}</span></b><small>Positions selected</small><div className="progress-track"><i style={{width: `${selectedCount / positions.length * 100}%`}}/></div></div></div>
-      <div className="ballot-layout">
-        <aside className="position-list"><span className="aside-label">ELECTORAL POSITIONS</span>{positions.map((p,i)=><button key={p.id} className={activePosition===i?"position-tab active": "position-tab"} onClick={()=>setActivePosition(i)}><span className="position-index">0{i+1}</span><span>{p.title}</span>{selections[p.id] && <CheckCircle2 size={17} className="tab-check"/>}</button>)}</aside>
-        <section className="candidate-panel">
-          <div className="candidate-panel-top"><div><span className="eyebrow">POSITION 0{activePosition+1} OF 0{positions.length}</span><h2>{currentPosition.title}</h2><p>{currentPosition.description}</p></div><span className="required-tag">Select one</span></div>
-          <div className="candidate-grid">{currentPosition.candidates.map((c,i)=><button key={c.id} className={selections[currentPosition.id]===c.id?"candidate-card selected":"candidate-card"} onClick={()=>setSelections(s=>({...s,[currentPosition.id]:c.id}))}>
-            <div className="candidate-top"><div className={`candidate-avatar avatar-${i}`}>{c.initials}</div><span className="radio-mark">{selections[currentPosition.id]===c.id && <Check size={14}/>}</span></div>
-            <h3>{c.name}</h3><span className="candidate-dept">{c.department}</span><p>{c.manifesto}</p><span className="select-label">{selections[currentPosition.id]===c.id?"Selected":"Select candidate"}</span>
-          </button>)}</div>
-          <div className="candidate-nav"><button className="button button-quiet" disabled={activePosition===0} onClick={()=>setActivePosition(i=>i-1)}><ArrowLeft size={16}/> Previous</button>{activePosition<positions.length-1?<button className="button button-primary" onClick={()=>setActivePosition(i=>i+1)}>Next position <ArrowRight size={16}/></button>:<button className="button button-primary" onClick={()=>{if(allSelected)go("review");else setError("Please select a candidate for every position.")}}>Review ballot <ArrowRight size={16}/></button>}</div>
-          {error && <div className="inline-error ballot-error"><AlertCircle size={16}/>{error}</div>}
-        </section>
-      </div>
-    </main>}
-
-    {page === "review" && <main className="flow-page">
-      <button className="back-link" onClick={() => go("ballot")}><ArrowLeft size={16}/> Back to ballot</button>
-      <FlowHeader active={2}/>
-      <div className="review-layout"><div className="review-intro"><span className="eyebrow">FINAL CHECK</span><h1>Review your<br/><em>selections.</em></h1><p>Make sure everything is correct. In a live election, a submitted ballot may not be changed.</p></div>
-        <div className="review-card"><div className="review-card-head"><div><h2>Ballot summary</h2><p>{positions.length} electoral positions</p></div><span className="review-badge"><CheckCircle2 size={15}/> Complete</span></div>
-          {chosen.map((p,i)=><div className="review-row" key={p.id}><div><span className="review-position">0{i+1} / {p.title}</span><b>{p.candidate?.name || "No selection"}</b></div><button onClick={()=>{setActivePosition(i);go("ballot")}}>Edit</button></div>)}
-          <div className="review-warning"><Info size={17}/><span>Take a final moment to review. The live election rules will determine whether a submitted ballot can be changed.</span></div>
-          {error && <div className="inline-error"><AlertCircle size={16}/>{error}</div>}
-          <button className="button button-primary full-button" onClick={submitDemo}>Confirm selections <Check size={17}/></button>
-          <p className="form-footnote"><LockKeyhole size={13}/> Demo only — this action will not submit a real vote.</p>
-        </div>
-      </div>
-    </main>}
-
-    {page === "success" && <main className="success-page">
-      <div className="success-icon"><Check size={38}/></div><span className="eyebrow">DEMONSTRATION COMPLETE</span><h1>Your ballot journey<br/><em>is complete.</em></h1>
-      <p>This is a frontend preview. No vote has been cast, stored or transmitted. A live confirmation screen will only appear after the secure election backend confirms receipt of a ballot.</p>
-      <div className="receipt-card"><span>DEMO REFERENCE</span><b>{receipt}</b><small>Illustrative reference only — not a valid voting receipt.</small></div>
-      <button className="button button-primary" onClick={()=>{setSelections({});setStudentId("");setPin("");setActivePosition(0);go("home")}}>Return to portal <ArrowRight size={17}/></button>
-    </main>}
-
-    <Footer/>
-
-    {showHelp && <div className="modal-backdrop" onClick={()=>setShowHelp(false)}><div className="help-modal" onClick={e=>e.stopPropagation()}><button className="modal-close" onClick={()=>setShowHelp(false)} aria-label="Close"><X/></button><span className="eyebrow">VOTER GUIDE</span><h2>How to vote</h2><div className="help-item"><span>01</span><div><b>Get your voter details</b><p>Use the matriculation number or approved 100-level registration number and unique PIN issued by the Electoral Committee.</p></div></div><div className="help-item"><span>02</span><div><b>Verify your eligibility</b><p>Enter your details on the voter access page. If verification fails, contact the committee through its official support channel.</p></div></div><div className="help-item"><span>03</span><div><b>Make your selections</b><p>Review each position and select one candidate according to the published election rules.</p></div></div><div className="help-item"><span>04</span><div><b>Review before submitting</b><p>Confirm your selections and wait for the live system to acknowledge successful ballot receipt.</p></div></div><div className="help-contact"><Info size={16}/> This demonstration does not connect to the official voter register or election database.</div><button className="button button-primary full-button" onClick={()=>{setShowHelp(false);go("verify")}}>Continue to voter access <ArrowRight size={16}/></button></div></div>}
+    <header className="site-header"><div className="site-header-inner"><button className="brand-control" onClick={()=>go(session?'dashboard':'home')} aria-label="Return to portal home"><Brand/></button>
+      <nav className={`site-nav ${menuOpen?'expanded':''}`} aria-label="Primary navigation">
+        <button onClick={()=>go(session?'dashboard':'home')}>{session?'My dashboard':'Home'}</button>
+        <button onClick={()=>{openHelp();setMenuOpen(false);}}>How to vote</button>
+        {session ? <button className="nav-link-cta" onClick={()=>{setMenuOpen(false);onSignOut();}}>Sign out <LogOut size={15}/></button> : <button className="nav-link-cta" onClick={()=>go('login')}>Access ballot <ArrowRight size={15}/></button>}
+      </nav>
+      <button type="button" className="mobile-menu" onClick={()=>setMenuOpen(s=>!s)} aria-label="Toggle navigation" aria-expanded={menuOpen}>{menuOpen?<X size={21}/>:<Menu size={21}/>}</button>
+    </div></header>
+    {DEMO_MODE && <div className="preview-ribbon"><Info size={15}/><span><b>DEMONSTRATION ONLY</b> — Synthetic voters and candidates. No real authentication or votes.</span></div>}
+    {children}
+    <footer className="site-footer"><div className="footer-inner"><div><b>NAMES UNIBEN</b><span>National Association of Mechanical, Mechatronics and Marine Engineering Students</span></div><div className="footer-right"><small>© 2026 NAMES UNIBEN</small><span className="footer-credit">© Vaultr Technologies 2026</span></div></div></footer>
   </div>;
 }
-
-function FlowHeader({active}) {
-  return <div className="flow-header"><div className="flow-title"><span className="eyebrow">NAMES UNIBEN • 2026 ELECTION</span><h2>Electoral portal</h2></div><div className="flow-steps">{steps.map((s,i)=><div className={i===active?"flow-step active":i<active?"flow-step done":"flow-step"} key={s}><span>{i<active?<Check size={13}/>:i+1}</span><small>{s}</small></div>)}</div></div>;
+function FlowProgress({active}) {
+  return <div className="flow-progress" aria-label="Voting steps">{processSteps.map((step,i)=><div className={`flow-item ${i===active?'current':i<active?'complete':''}`} key={step}><span className="flow-num">{i<active?<Check size={13}/>:i+1}</span><span className="flow-name">{step}</span></div>)}</div>;
 }
+function Home({onStart,openHelp,election,loading,loadError}) {
+  const ready = election?.status === 'open';
+  return <main>
+    <section className="hero"><div className="hero-copy"><div className="overline"><span className="overline-dot"/>NAMES UNIBEN • 2026 ELECTION</div>
+      <h1>Your voice.<br/><em>Your choice.</em><br/>Our future.</h1>
+      <p>The official digital election portal for the National Association of Mechanical, Mechatronics and Marine Engineering Students, University of Benin.</p>
+      <div className="hero-buttons"><button className="btn btn-primary" disabled={!ready||loading} onClick={onStart}>{loading?'Checking election…':ready?'Proceed to vote':'Voting not yet available'} <ArrowRight size={18}/></button><button className="btn btn-text" onClick={openHelp}><HelpCircle size={18}/> How voting works</button></div>
+      {loadError && <InfoBox kind="error">The election service is not connected. Voting is unavailable until the secure backend is online.</InfoBox>}
+      {!loadError && election?.status === 'upcoming' && <InfoBox>Voting has not opened yet. Return during the scheduled election window.</InfoBox>}
+      {!loadError && election?.status === 'closed' && <InfoBox>Voting has ended. Official results will be published by the Electoral Committee.</InfoBox>}
+      <div className="hero-trust"><ShieldCheck size={17}/> Student-focused • Secure access • Confidential ballot</div>
+    </div><div className="hero-graphic" aria-hidden="true"><div className="orbit orbit-large"/><div className="orbit orbit-small"/><div className="illustration-card"><div className="illustration-top"><span className="illustration-icon"><Vote size={23}/></span><b>NAMES STUDENT VOTE</b><span className="illustration-indicator"/></div><div className="paper"><span className="paper-title"/><span className="paper-line"/><span className="paper-line short"/>{[1,2,3].map(i=><div key={i} className="paper-choice"><span/><b/></div>)}</div><div className="illustration-check"><Check size={28}/></div><div className="illustration-bottom"><div><strong>One student</strong><small>One accepted ballot</small></div><ArrowUpRight size={19}/></div></div><span className="float-label float-a"><ShieldCheck size={15}/> Identity checked</span><span className="float-label float-b"><CheckCircle2 size={15}/> Your vote matters</span></div></section>
+    <section className="feature-band" aria-label="Portal benefits"><div><span className="feature-icon"><Fingerprint/></span><span><strong>Verified access</strong><small>Approved student records</small></span></div><div><span className="feature-icon alt"><Vote/></span><span><strong>Your department, your ballot</strong><small>Relevant VP candidates only</small></span></div><div><span className="feature-icon green"><ShieldCheck/></span><span><strong>Confidential voting</strong><small>Designed to protect your choices</small></span></div></section>
+    <section className="content-section"><div className="section-intro"><div className="overline">BE INFORMED. TAKE PART.</div><h2>Three simple steps.</h2><p>A clear, mobile-friendly voting experience for every eligible NAMES student.</p></div><div className="feature-cards"><article><span className="step-index">01</span><span className="feature-icon large"><LockKeyhole/></span><h3>Verify your identity</h3><p>Sign in using your approved student account or verified registration details.</p></article><article><span className="step-index">02</span><span className="feature-icon large alt"><Users/></span><h3>Review your ballot</h3><p>View association-wide candidates and only the Vice President candidates for your department.</p></article><article><span className="step-index">03</span><span className="feature-icon large green"><ClipboardCheck/></span><h3>Submit once</h3><p>Review your selections and submit your ballot securely. Wait for confirmation.</p></article></div></section>
+    <section className="callout"><div><span className="callout-overline">EVERY ELIGIBLE VOICE MATTERS</span><h2>Leadership begins with participation.</h2><p>Check the official election schedule and review the approved candidates before casting your ballot.</p></div><button className="btn btn-white" onClick={onStart} disabled={!ready}>Access voting portal <ArrowRight size={16}/></button></section>
+  </main>;
+}
+function Login({onBack, onDemoSignIn, onAuth, error, setError}) {
+  const [authTab,setAuthTab]=useState('institutional');
+  const [identifier,setIdentifier]=useState('');
+  const [challenge,setChallenge]=useState(null);
+  const [otp,setOtp]=useState('');
+  const [working,setWorking]=useState(false);
+  const [selectedPreview,setSelectedPreview]=useState('demo-marine');
+  const startGoogle = () => { setError(''); try {window.location.assign(getGoogleLoginUrl());} catch(e){setError(displayError(e));} };
+  const sendCode = async(e)=>{e.preventDefault();setError('');setWorking(true);try{const response=await requestOtp(identifier.trim(),'registration');setChallenge(response);setOtp('');}catch(e){setError(displayError(e));}finally{setWorking(false);}};
+  const confirmCode=async(e)=>{e.preventDefault();setError('');setWorking(true);try{const response=await verifyOtp(challenge.challengeId,otp.trim());await onAuth(response);}catch(e){setError(displayError(e));}finally{setWorking(false);}};
+  return <main className="inner-page"><div className="container"><button className="back-button" onClick={onBack}><ArrowLeft size={16}/> Back to home</button><FlowProgress active={0}/><div className="two-column form-layout"><div className="side-copy"><div className="overline">VOTER ACCESS</div><h1>Verify that<br/><em>it's you.</em></h1><p>Use your approved student record to access your personal election dashboard. Your department and eligible positions are assigned automatically.</p><div className="side-help"><ShieldCheck size={19}/><span>Never share your university password or email verification code with anyone, including Vaultr or ELECO representatives.</span></div></div>
+    <div className="panel auth-panel"><div className="panel-title"><span className="panel-symbol"><LockKeyhole size={22}/></span><div><h2>Student verification</h2><p>Choose the method appropriate for your level.</p></div></div>
+      {DEMO_MODE ? <div className="demo-login"><InfoBox>Preview mode uses synthetic voter profiles. No university account, PIN or real email is needed.</InfoBox><label className="field-label" htmlFor="demo-voter">Choose a test voter</label><div className="select-field"><select id="demo-voter" value={selectedPreview} onChange={e=>setSelectedPreview(e.target.value)}>{previewVoters.map(v=><option key={v.id} value={v.id}>{v.level} Level — {v.department}</option>)}</select><ChevronDown size={17}/></div><button className="btn btn-primary btn-full" onClick={()=>onDemoSignIn(selectedPreview)}>Preview voter dashboard <ArrowRight size={17}/></button></div> : <>
+        <div className="auth-tabs" role="tablist" aria-label="Student level"><button type="button" role="tab" aria-selected={authTab==='institutional'} className={authTab==='institutional'?'active':''} onClick={()=>{setAuthTab('institutional');setError('');}}>200–500 Level</button><button type="button" role="tab" aria-selected={authTab==='registration'} className={authTab==='registration'?'active':''} onClick={()=>{setAuthTab('registration');setError('');}}>100 Level</button></div>
+        {authTab==='institutional'?<div className="login-method"><div className="method-label"><Mail size={18}/> Institutional Google account</div><p>Sign in with your existing <b>@eng.uniben.edu</b> account. Your university password is never entered on this website.</p><button className="google-button" type="button" onClick={startGoogle}><span className="google-g">G</span> Continue with Google <ArrowRight size={17}/></button><div className="muted-foot">Access is granted only after the signed-in account matches an approved voter record.</div></div> : <div className="login-method">{!challenge?<form onSubmit={sendCode}><p>Enter the UB/B1 registration number linked to your ELECO-approved student record. We'll send a code to the verified email already on file.</p><label className="field-label" htmlFor="registration-id">UB / B1 registration number</label><input className="text-field" id="registration-id" autoComplete="off" value={identifier} onChange={e=>setIdentifier(e.target.value)} required placeholder="Enter your registration number"/><button className="btn btn-primary btn-full" type="submit" disabled={working||!identifier.trim()}>{working?'Requesting…':'Send verification code'} <ArrowRight size={16}/></button></form>:<form onSubmit={confirmCode}><p>Enter the code sent to your previously verified email address.</p>{challenge.deliveryHint&&<div className="delivery-hint"><Mail size={17}/> {challenge.deliveryHint}</div>}<label className="field-label" htmlFor="email-code">Email verification code</label><input className="text-field otp-input" id="email-code" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={e=>setOtp(e.target.value)} placeholder="Enter your code" required/><button className="btn btn-primary btn-full" type="submit" disabled={working||!otp.trim()}>{working?'Verifying…':'Verify and continue'} <ArrowRight size={16}/></button><button type="button" className="text-action" onClick={()=>{setChallenge(null);setOtp('');setError('');}}>Use another registration number</button></form>}</div>}
+        <InfoBox>Don't have access to your institutional account or approved email? Contact ELECO through its officially announced support channel.</InfoBox>
+      </>}
+      {error&&<InfoBox kind="error">{error}</InfoBox>}
+    </div></div></div></main>;
+}
+function Dashboard({voter,election,onBallot,onSignOut,working,error}) {
+  return <main className="inner-page"><div className="container"><FlowProgress active={1}/><div className="dashboard-header"><div><div className="overline">PERSONALISED VOTER PORTAL</div><h1>Welcome, <em>{voter?.fullName?.split(' ')[0] || 'student'}.</em></h1><p>Your identity has been verified for this session. Please confirm your information before continuing.</p></div><StatusBadge status={election?.status}/></div><div className="dashboard-grid"><section className="panel voter-card"><div className="voter-card-title"><span className="profile-avatar"><Users size={24}/></span><span><b>Verified student</b><small>NAMES UNIBEN voter register</small></span><BadgeCheck size={21} className="verified-mark"/></div><div className="voter-lines"><div><small>Full name</small><b>{voter.fullName}</b></div><div><small>Department</small><b>{voter.department}</b></div><div><small>Level</small><b>{voter.level} Level</b></div><div><small>Student identifier</small><b>{shortenId(voter.identifier)}</b></div></div><div className="voter-alert"><ShieldCheck size={17}/> Your department is assigned from your verified record. It cannot be changed on this page.</div></section><section className="panel dashboard-action"><div className="action-icon"><Vote size={26}/></div><span className="overline">YOUR ELECTION ACCESS</span><h2>{voter.hasVoted?'Your ballot has been received':'Your ballot is ready'}</h2><p>{voter.hasVoted?'Our records show that a ballot has already been accepted for this account.':'Your ballot contains association-wide positions and the Vice President contest for your department.'}</p><div className="dashboard-facts"><div><CheckCircle2 size={17}/><span>General NAMES electoral positions</span></div><div><CheckCircle2 size={17}/><span>Vice President — {voter.department}</span></div><div><LockKeyhole size={17}/><span>One accepted ballot per eligible student</span></div></div>{!voter.hasVoted&&<button className="btn btn-primary btn-full" onClick={onBallot} disabled={working||election?.status!=='open'}>{working?'Preparing your ballot…':'Proceed to your ballot'} <ArrowRight size={17}/></button>}{voter.hasVoted&&<InfoBox kind="success">This student account has already voted. No additional ballot can be submitted.</InfoBox>}{error&&<InfoBox kind="error">{error}</InfoBox>}<button className="text-action" onClick={onSignOut}>Sign out of this session</button></section></div></div></main>;
+}
+function CandidateCard({candidate,selected,onSelect}) {
+  return <button type="button" className={`candidate-card ${selected?'chosen':''}`} onClick={onSelect} aria-pressed={selected}><div className="candidate-card-top">{candidate.photoUrl && /^https:\/\//.test(candidate.photoUrl) ? <img className="avatar-photo" src={candidate.photoUrl} alt=""/>:<span className="candidate-avatar">{brandInitials(candidate.name)}</span>}<span className="candidate-check">{selected&&<Check size={14}/>}</span></div><h3>{candidate.name}</h3><small>{candidate.department||'Candidate'}</small><p>{candidate.tagline||'Candidate information provided by the Electoral Committee.'}</p><span className="candidate-select-text">{selected?'Selected':'Select candidate'}</span></button>;
+}
+function Ballot({ballot,choices,setChoices,index,setIndex,onReview,onDashboard,error}) {
+  const positions=ballot?.positions||[];
+  const position=positions[index];
+  const completed = positions.filter(p=>choices[p.id]).length;
+  if (!position) return <main className="inner-page"><div className="container"><InfoBox kind="error">No electoral positions are available for your verified account. Contact ELECO.</InfoBox><button className="btn btn-outline" onClick={onDashboard}>Back to dashboard</button></div></main>;
+  return <main className="inner-page"><div className="container"><button className="back-button" onClick={onDashboard}><ArrowLeft size={16}/> Back to dashboard</button><FlowProgress active={2}/><div className="ballot-top"><div><div className="overline">PRIVATE BALLOT • {ballot.election?.title||'NAMES UNIBEN'}</div><h1>Choose your <em>leaders.</em></h1><p>Review each candidate before selecting. Your selections are only submitted after final confirmation.</p></div><div className="count-card"><b>{completed}<span> / {positions.length}</span></b><small>Positions selected</small><div className="count-track"><span style={{width:`${completed/positions.length*100}%`}}/></div></div></div>
+      <div className="ballot-grid"><aside className="position-sidebar"><div className="sidebar-title">ELECTORAL POSITIONS</div>{positions.map((p,i)=><button type="button" key={p.id} className={`position-link ${index===i?'active':''}`} onClick={()=>setIndex(i)}><span className="position-index">{String(i+1).padStart(2,'0')}</span><span className="position-text">{p.title}</span>{choices[p.id]&&<CheckCircle2 className="position-done" size={17}/>}</button>)}</aside><section className="panel ballot-panel"><div className="ballot-panel-head"><div><div className="overline">POSITION {index+1} OF {positions.length}</div><h2>{position.title}</h2><p>{position.scope==='department'?'Only students belonging to your verified department can vote in this contest.':'This position is open to all eligible NAMES voters.'}</p></div><span className="small-tag">Choose one</span></div><div className="candidate-grid">{position.candidates.map(c=><CandidateCard key={c.id} candidate={c} selected={choices[position.id]===c.id} onSelect={()=>setChoices(prev=>({...prev,[position.id]:c.id}))}/>)}</div>{position.candidates.length===0&&<InfoBox kind="error">No candidates have been published for this position. Please contact ELECO.</InfoBox>}<div className="ballot-controls"><button type="button" className="btn btn-text" disabled={index===0} onClick={()=>setIndex(index-1)}><ArrowLeft size={16}/> Previous</button>{index<positions.length-1?<button className="btn btn-primary" onClick={()=>setIndex(index+1)}>Next position <ArrowRight size={16}/></button>:<button className="btn btn-primary" onClick={onReview} disabled={completed!==positions.length}>Review selections <ArrowRight size={16}/></button>}</div>{index===positions.length-1&&completed!==positions.length&&<p className="helper-line">Select a candidate in all {positions.length} positions to review your ballot.</p>}{error&&<InfoBox kind="error">{error}</InfoBox>}</section></div></div></main>;
+}
+function Review({ballot,choices,onEdit,onSubmit,busy,error,confirmed,setConfirmed,onCheckStatus,checking}) {
+  const selected = ballot.positions.map((p,i)=>({index:i,title:p.title,candidate:p.candidates.find(c=>c.id===choices[p.id])}));
+  return <main className="inner-page"><div className="container"><button className="back-button" onClick={()=>onEdit(0)}><ArrowLeft size={16}/> Back to ballot</button><FlowProgress active={3}/><div className="two-column review-layout"><div className="side-copy"><div className="overline">FINAL CONFIRMATION</div><h1>Review your<br/><em>selections.</em></h1><p>Please check every candidate carefully. Once submitted, your ballot cannot be changed or submitted a second time.</p><div className="side-help"><LockKeyhole size={19}/><span>Your confirmation receipt should not disclose who you voted for.</span></div></div><section className="panel review-card"><div className="review-header"><div><h2>Ballot summary</h2><p>{selected.length} electoral positions</p></div><span className="small-tag success"><CheckCircle2 size={14}/> Complete</span></div><div className="review-rows">{selected.map(s=><div className="review-line" key={s.title}><div><small>{String(s.index+1).padStart(2,'0')} / {s.title}</small><strong>{s.candidate?.name||'Selection missing'}</strong></div><button className="text-action" onClick={()=>onEdit(s.index)}>Edit</button></div>)}</div><InfoBox>Confirm only when you are satisfied with every choice. This is a one-time submission.</InfoBox><label className="confirmation-check"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span>I have reviewed all my selections and understand my ballot cannot be edited after submission.</span></label>{error&&<InfoBox kind="error">{error}</InfoBox>}<button className="btn btn-primary btn-full" onClick={onSubmit} disabled={!confirmed||busy||checking}>{busy?'Submitting securely…':'Submit my ballot'} <Check size={17}/></button>{error&&<button className="btn btn-outline btn-full check-status" onClick={onCheckStatus} disabled={checking}>{checking?'Checking…':'Check whether a ballot was received'} <RefreshCw size={15}/></button>}<p className="secure-note"><LockKeyhole size={13}/> Confirmation appears only after a successful server response.</p></section></div></div></main>;
+}
+function Confirmation({receipt,onFinish}) {
+  return <main className="confirmation-page"><FlowProgress active={4}/><div className="success-symbol"><Check size={39}/></div><div className="overline">{DEMO_MODE?'PREVIEW COMPLETED':'BALLOT RECEIVED'}</div><h1>{DEMO_MODE?'Demo ballot':'Your vote'}<br/><em>{DEMO_MODE?'journey complete.':'has been received.'}</em></h1><p>{DEMO_MODE?'This was a synthetic demonstration. Nothing was saved to an election database.':'The voting service confirmed receipt of your ballot. Your selections are not displayed on this confirmation page.'}</p>{receipt?.receiptId&&<div className="receipt-box"><small>{DEMO_MODE?'DEMO REFERENCE':'CONFIRMATION REFERENCE'}</small><strong>{receipt.receiptId}</strong><span>{DEMO_MODE?'Not a valid voting receipt.':'Keep this confirmation reference for any follow-up with the Electoral Committee.'}</span></div>}<button className="btn btn-primary" onClick={onFinish}>Return to portal <ArrowRight size={17}/></button></main>;
+}
+function HelpModal({onClose}) {
+  useEffect(()=>{const key=e=>{if(e.key==='Escape') onClose();};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key);},[onClose]);
+  return <div className="modal-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section role="dialog" aria-modal="true" aria-labelledby="modal-title" className="help-dialog"><button className="modal-x" onClick={onClose} aria-label="Close guide"><X size={20}/></button><div className="overline">STUDENT VOTING GUIDE</div><h2 id="modal-title">How the portal works</h2>{[
+    ['01','Open the election portal','Read the instructions and check whether voting is currently open.'],
+    ['02','Verify your identity','200–500 level use approved institutional Google sign-in. 100 level use their approved registration number and verified email OTP.'],
+    ['03','Confirm your record','Check your name, level and department on your private dashboard. Contact ELECO if any detail is wrong.'],
+    ['04','Cast your ballot','Select candidates for association-wide positions and your department’s Vice President contest.'],
+    ['05','Review and submit','Check each choice, submit once and wait for confirmation. If connectivity fails, check ballot status before trying again.'],
+  ].map(([no,title,desc])=><div className="help-step" key={no}><span>{no}</span><div><strong>{title}</strong><p>{desc}</p></div></div>)}<InfoBox>Only the Electoral Committee may resolve disputed or incorrect student records. Do not share OTPs or passwords with anyone.</InfoBox><button className="btn btn-primary btn-full" onClick={onClose}>Understood <Check size={16}/></button></section></div>;
+}
+export default function App() {
+  const [page,setPage]=useState('home');
+  const [election,setElection]=useState(null);
+  const [loadingElection,setLoadingElection]=useState(true);
+  const [electionError,setElectionError]=useState('');
+  const [accessToken,setAccessToken]=useState('');
+  const [voter,setVoter]=useState(null);
+  const [ballot,setBallot]=useState(null);
+  const [choices,setChoices]=useState({});
+  const [positionIndex,setPositionIndex]=useState(0);
+  const [receipt,setReceipt]=useState(null);
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [checking,setChecking]=useState(false);
+  const [confirmed,setConfirmed]=useState(false);
+  const [showHelp,setShowHelp]=useState(false);
+  const oauthProcessed=useRef(false);
+  const idempotencyKey=useRef('');
+  const navigate=useCallback(next=>{setError('');setPage(next);window.scrollTo({top:0,behavior:'smooth'});},[]);
+  const goHome=()=>navigate('home');
 
-export default App;
+  useEffect(()=>{
+    let alive=true;
+    getElection().then(data=>{if(alive){setElection(data);setElectionError('');}}).catch(e=>{if(alive){setElectionError(displayError(e));}}).finally(()=>{if(alive)setLoadingElection(false);});
+    return()=>{alive=false;};
+  },[]);
+
+  const onAuthenticated=useCallback(async(result)=>{
+    if(!result?.accessToken)throw new ApiError('The authentication service did not return an access token.');
+    const currentVoter=result.voter||await getMe(result.accessToken);
+    if(!currentVoter?.id||!currentVoter?.department)throw new ApiError('The verified student record is incomplete. Contact ELECO.');
+    setAccessToken(result.accessToken);
+    setVoter(currentVoter);
+    navigate('dashboard');
+  },[navigate]);
+
+  useEffect(()=>{
+    if (oauthProcessed.current) return;
+    const url=new URL(window.location.href);
+    const code=url.searchParams.get('login_code');
+    const authError=url.searchParams.get('auth_error');
+    if(!code&&!authError)return;
+    oauthProcessed.current=true;
+    url.searchParams.delete('login_code');url.searchParams.delete('auth_error');
+    window.history.replaceState(null,'',url.pathname+url.search+url.hash);
+    if(authError){setError('Institutional sign-in could not be completed. Please try again or contact ELECO.');setPage('login');return;}
+    setBusy(true);
+    exchangeGoogleCode(code).then(onAuthenticated).catch(e=>{setError(displayError(e));setPage('login');}).finally(()=>setBusy(false));
+  },[onAuthenticated]);
+
+  const handleSignout=async()=>{
+    const token=accessToken;
+    setAccessToken('');setVoter(null);setBallot(null);setChoices({});setReceipt(null);setConfirmed(false);idempotencyKey.current='';
+    navigate('home');
+    if(token)await logout(token);
+  };
+  const startBallot=async()=>{
+    if(!accessToken){navigate('login');return;}
+    setError('');setBusy(true);
+    try {
+      const response=await getBallot(accessToken);
+      if(!Array.isArray(response.positions)||!response.positions.length)throw new ApiError('No ballot positions are available for this student.');
+      if(response.voter?.department&&response.voter.department!==voter.department)throw new ApiError('The server returned an inconsistent student department. Contact ELECO.');
+      setBallot(response);setChoices({});setPositionIndex(0);setConfirmed(false);
+      idempotencyKey.current='';navigate('ballot');
+    }catch(e){setError(displayError(e));}finally{setBusy(false);}
+  };
+  const reviewBallot=()=>{if(ballot?.positions.every(p=>choices[p.id]))navigate('review');else setError('Please select a candidate for every position.');};
+  const editSelection=(index)=>{setPositionIndex(index);navigate('ballot');};
+  const handleStatus=async()=>{
+    if(!accessToken)return;
+    setChecking(true);
+    try {
+      const response=await getVoteStatus(accessToken);
+      if(response.status==='accepted'){
+        setReceipt(response);setVoter(v=>({...v,hasVoted:true}));navigate('success');
+      }else if(response.status==='not_submitted')setError('No accepted ballot was found. Your selections are still here. You may try submitting again.');
+      else setError('The server could not confirm your ballot status. Contact ELECO before attempting another submission.');
+    }catch(e){setError(displayError(e));}finally{setChecking(false);}
+  };
+  const submitBallot=async()=>{
+    if(!confirmed||!ballot||busy)return;
+    setError('');setBusy(true);
+    if(!idempotencyKey.current)idempotencyKey.current=globalThis.crypto?.randomUUID?.()||`vote-${Date.now()}`;
+    const selections=ballot.positions.map(p=>({positionId:p.id,candidateId:choices[p.id]}));
+    try{
+      const response=await castVote(accessToken,selections,idempotencyKey.current);
+      if(response?.status!=='accepted'||!response.receiptId)throw new ApiError('The server did not confirm ballot acceptance. Check your status before retrying.');
+      setReceipt(response);setVoter(v=>({...v,hasVoted:true}));navigate('success');
+    }catch(e){setError(e.code==='ALREADY_VOTED'?'A ballot has already been accepted for this student. Check the ballot status.':displayError(e));}
+    finally{setBusy(false);}
+  };
+  const onDemoSignIn=async(id)=>{
+    setBusy(true);setError('');
+    try{await onAuthenticated(await previewSignIn(id));}catch(e){setError(displayError(e));}finally{setBusy(false);}
+  };
+  const resetToHome=async()=>{await handleSignout();};
+  const canVote=election?.status==='open';
+  const protectedPage=Boolean(accessToken&&voter);
+  const effectivePage = !protectedPage && ['dashboard','ballot','review','success'].includes(page)?'login':page;
+  return <Shell page={effectivePage} setPage={navigate} election={election} session={protectedPage} onSignOut={handleSignout} openHelp={()=>setShowHelp(true)}>
+    {effectivePage==='home'&&<Home election={election} loading={loadingElection} loadError={electionError} onStart={()=>navigate('login')} openHelp={()=>setShowHelp(true)}/>}
+    {effectivePage==='login'&&<Login onBack={goHome} onDemoSignIn={onDemoSignIn} onAuth={onAuthenticated} error={error} setError={setError}/>}
+    {effectivePage==='dashboard'&&voter&&<Dashboard voter={voter} election={election} onBallot={startBallot} onSignOut={handleSignout} working={busy} error={error}/>}
+    {effectivePage==='ballot'&&ballot&&<Ballot ballot={ballot} choices={choices} setChoices={setChoices} index={positionIndex} setIndex={setPositionIndex} onReview={reviewBallot} onDashboard={()=>navigate('dashboard')} error={error}/>}
+    {effectivePage==='review'&&ballot&&<Review ballot={ballot} choices={choices} onEdit={editSelection} onSubmit={submitBallot} busy={busy} error={error} confirmed={confirmed} setConfirmed={setConfirmed} onCheckStatus={handleStatus} checking={checking}/>}
+    {effectivePage==='success'&&receipt&&<Confirmation receipt={receipt} onFinish={resetToHome}/>}
+    {showHelp&&<HelpModal onClose={()=>setShowHelp(false)}/>}
+  </Shell>;
+}

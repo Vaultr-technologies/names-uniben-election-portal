@@ -1,57 +1,166 @@
-# NAMES UNIBEN Electoral Portal — Frontend Preview
+# NAMES UNIBEN Electoral Portal — Frontend v2
 
-Responsive React + Vite frontend for the 2026 NAMES UNIBEN election portal, branded with the provided NAMES/UNIBEN logos.
+**Vaultr Technologies · React + Vite · Public homepage → authentication → verified dashboard → eligible ballot → review → server-confirmed receipt.**
 
-## Deploy with GitHub Pages
-
-1. Create an empty repository on GitHub, e.g. `names-uniben-election-portal` (no automatic README / license / gitignore).
-2. Extract this ZIP, and open a terminal **inside the extracted project folder** (the folder containing `package.json`).
-3. Replace `YOUR_GITHUB_USERNAME` below with your actual GitHub username:
-
-```bash
-git init
-git add .
-git commit -m "Initial NAMES electoral portal frontend"
-git branch -M main
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/names-uniben-election-portal.git
-git push -u origin main
-```
-
-4. Open your GitHub repo > **Settings** > **Pages** > **Build and deployment** > **Source** > select **GitHub Actions**.
-5. Open the repo's **Actions** tab and confirm `Deploy NAMES Election Portal Preview` passes. If necessary, click **Run workflow**.
-6. Open `https://YOUR_GITHUB_USERNAME.github.io/names-uniben-election-portal/`.
-
-The `.github/workflows/deploy.yml` workflow builds and publishes the site automatically on later pushes to `main`. The Vite `base` path is automatically set from the GitHub repository name during Actions builds, so you don't need to edit it when choosing a different repository name.
-
-**Do not configure Settings > Pages > Deploy from a branch.** Vite source files must be compiled; this repository uses the **GitHub Actions** deployment source.
+This package updates the original NAMES UNIBEN frontend and retains both supplied university/association logos and the Vaultr copyright credit.
 
 ## Run locally
 
 ```bash
 npm install
+cp .env.example .env.local
+# For a synthetic local UI walkthrough, set VITE_DEMO_MODE=true in .env.local
 npm run dev
 ```
 
-## Build locally
+To build:
 
 ```bash
 npm run build
-npm run preview
 ```
 
-## Included
+## Two deliberately separate modes
 
-- NAMES and University of Benin supplied logos
-- Responsive election landing page and voter instructions
-- Identity form for matriculation numbers or 100-level registration numbers
-- Candidate-selection flow using illustrative placeholders
-- Ballot review and demo confirmation
-- Footer credit: © Vaultr Technologies 2026
+### GitHub Pages approval / supervised UI demonstration
 
-## Important — demonstration only
+The supplied `.github/workflows/deploy.yml` explicitly builds with `VITE_DEMO_MODE=true`.
 
-The frontend **does not** authenticate voters or record real votes. The verification form accepts any non-empty ID and PIN for navigation only. The confirmation screen is not a real voting receipt.
+- Shows a permanent **DEMONSTRATION ONLY** banner.
+- Four synthetic profiles (Marine 300L, Mechanical 400L, Mechatronics 200L, Marine 100L).
+- Allows a full walkthrough including **department-specific VP candidate selection**.
+- Uses a synthetic, in-memory ballot (cleared on reload); submits **no real votes** and does not contact a real voter register.
+- All candidate names are clearly marked as demonstration data.
 
-Never publish real student IDs, generated voting PINs, secret keys, voter lists, or election credentials in this repository. GitHub Pages is for **public static preview only**; production voting requires a secured backend, independent authorization, atomic vote handling, ballot secrecy, auditability, testing, and a recovery plan.
+This is safe for committee approval and Monday's UI rehearsal, **not** for Tuesday's actual election. Do not put the voter register, credentials, or real votes in the GitHub Pages repository.
 
-Replace placeholder positions and candidates in `src/data.js` with the election committee's approved list. Images are stored under `src/assets/`.
+### AWS production UI
+
+Build with:
+
+```bash
+VITE_DEMO_MODE=false VITE_API_BASE_URL=https://<your-api-host> npm run build
+```
+
+Windows PowerShell:
+
+```powershell
+$env:VITE_DEMO_MODE="false"
+$env:VITE_API_BASE_URL="https://YOUR-API-HOST"
+npm run build
+```
+
+The backend must be implemented and independently tested first. With `VITE_DEMO_MODE=false` and no API configured, the public landing page loads but voting is **disabled**. There is **no insecure client-side authentication fallback**. Vite embeds `VITE_*` environment values in public JavaScript, so never put secrets in them.
+
+The GitHub Pages workflow deliberately stays in demo mode even after AWS production is ready. Use a distinct AWS Amplify production site/build configuration.
+
+## Backend contract for Chinedu / AWS Lambda + API Gateway
+
+JSON over HTTPS. Responses for authenticated endpoints must use short-lived `accessToken` bearer tokens verified by the backend. This frontend keeps the token **in memory only** (no localStorage, sessionStorage, or URL token). A page refresh requires a new login; this is intentional for the first version. API Gateway CORS must explicitly permit the production web origin and `Authorization` / `Content-Type` headers.
+
+### Public API
+
+`GET /election`
+```json
+{
+  "id": "election-2026",
+  "title": "NAMES UNIBEN Elections 2026",
+  "status": "open",
+  "startsAt": "2026-11-10T08:00:00+01:00",
+  "endsAt": "2026-11-10T17:00:00+01:00"
+}
+```
+`status`: `upcoming`, `open`, or `closed`. The **backend** must enforce election time boundaries; frontend state is only a presentation aid.
+
+### 200–500 level institutional Google sign-in
+
+- `GET /auth/google/start` begins backend-owned OAuth2/OIDC flow using validated state and PKCE as appropriate.
+- Google callback handled **by the backend**, where Google issuer, signature, audience, expiry, `email_verified`, workspace `hd`, and stable Google `sub` must be verified.
+- Independently map the verified university account to **one approved student ID**; never infer identity from first/last name or a freely typed matric number.
+- Backend redirects to the allowlisted frontend URL with `?login_code=<short-lived-single-use-code>`. **Never redirect with an access token or student details in the URL.**
+- `POST /auth/google/exchange` body `{ "code":"..." }` returns `{ "accessToken":"...", "voter": {...} }`. Expire and atomically consume the short-lived code, bind it to the initiating auth flow.
+
+### 100 level verified email OTP
+
+`POST /auth/email/request`
+```json
+{"identifier":"UB-EXAMPLE-001","identifierType":"registration"}
+```
+Response:
+```json
+{"challengeId":"opaque-id","deliveryHint":"Code sent to your approved email"}
+```
+The backend must use an **independently verified voter-to-email association**; it must NOT send to an arbitrary email entered during authentication. Implement short OTP expiration, retry limits, rate limiting, delivery access checks, generic errors to prevent account enumeration, and prevent takeover through an unverified signup form.
+
+`POST /auth/email/verify`
+```json
+{"challengeId":"opaque-id","code":"123456"}
+```
+Returns `{ "accessToken":"...", "voter": {...} }` after server-side identity and eligibility checks. Avoid exposing OTP values in logs.
+
+### Private voter info / ballot
+
+`GET /voter/me`, bearer required.
+```json
+{"id":"internal-voter-id","fullName":"Approved Student","department":"Marine Engineering","level":300,"identifier":"ENG-EXAMPLE","hasVoted":false}
+```
+
+`GET /voter/ballot`, bearer required.
+```json
+{
+ "election":{"id":"election-2026","title":"NAMES UNIBEN Elections 2026"},
+ "voter":{"id":"internal-voter-id","department":"Marine Engineering"},
+ "positions":[
+  {"id":"president","title":"President","scope":"general","candidates":[{"id":"candidate-a","name":"Candidate A","department":"Marine Engineering"}]},
+  {"id":"marine-vp","title":"Vice President — Marine Engineering","scope":"department","department":"Marine Engineering","candidates":[{"id":"candidate-b","name":"Candidate B","department":"Marine Engineering"}]}
+ ]
+}
+```
+**The server, not the browser, must determine departmental eligibility.** The server must also reject submitted candidate IDs not belonging to the authenticated student's permitted contests. All approved candidates and offices must come from ELECO's signed-off records, not synthetic fixtures.
+
+### Ballot submission
+
+`POST /vote`, bearer required.
+```json
+{
+ "idempotencyKey":"random-uuid",
+ "selections":[{"positionId":"president","candidateId":"candidate-a"},{"positionId":"marine-vp","candidateId":"candidate-b"}]
+}
+```
+Successful response:
+```json
+{"status":"accepted","receiptId":"opaque-non-identifying-reference","submittedAt":"2026-11-10T10:00:00+01:00"}
+```
+
+Server requirements:
+- Authenticate approved student, enforce election window, eligible positions, and one accepted ballot **atomically** (DynamoDB transaction/conditional write) including concurrent and replayed attempts.
+- Protect ballot secrecy: avoid storing direct student-ID → selected-candidate records; review linkability through timestamps, request identifiers, audit records and logs.
+- Treat idempotency keys correctly, returning an identical receipt for a replayed identical request, and rejecting changed payloads with the same key.
+- Use independently retained election evidence and an independent reconciliation procedure; neither DynamoDB nor AWS alone proves that voters' selections were faithfully recorded.
+- Don't log passwords, tokens, OTPs, or selection contents.
+
+`GET /voter/vote-status`, bearer required:
+```json
+{"status":"accepted","receiptId":"opaque-reference"}
+```
+or `{ "status":"not_submitted" }`. Uncertain states require investigation rather than blindly retrying a ballot.
+
+`POST /auth/logout`, bearer required, invalidates the session server-side.
+
+### Important known gaps / launch blockers
+
+This is **a production-oriented frontend, NOT a complete certified election system.** Before any real votes:
+- Get written ELECO approval of the authentic student register, departmental affiliations, candidate list, opening/closing times, and credential issuance.
+- Ensure 100-level identity-to-email mapping is independently trustworthy. Name + UB number + self-submitted email does not establish voter identity.
+- Test Google Workspace access, authoritative institutional email mapping, session expiration and recovery procedures.
+- Conduct a supervised full mock election and load test, assess duplicate/impersonation attacks, security failures, secrecy, network interruptions, reconciliation and incident response; use an independent reviewer.
+- Do **not** claim end-to-end cryptographic verifiability. This frontend implements no such cryptography.
+- Get a paper-voting or postponement contingency approved if the controls cannot be demonstrated before the scheduled election.
+
+## Deployment
+
+The existing GitHub Pages workflow should show the **demo** at:
+`https://vaultr-technologies.github.io/names-uniben-election-portal/`
+
+The AWS Amplify production build must set `VITE_DEMO_MODE=false`, `VITE_API_BASE_URL=<actual API URL>`, use build command `npm run build`, and publish `dist`.
+
+**Vaultr Technologies Ltd.**
