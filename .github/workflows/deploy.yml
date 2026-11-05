@@ -32,6 +32,12 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Test frontend ballot rules
+        run: npm test
+
+      - name: Test AWS backend ballot rules
+        run: node --test aws/test/*.test.js
+
       - name: Build Vite site for GitHub Pages
         run: npm run build
         env:

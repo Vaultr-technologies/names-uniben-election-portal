@@ -1,39 +1,22 @@
-// Replace these illustrative entries with the election committee's approved candidate list.
-export const positions = [
-  {
-    id: "president",
-    title: "President",
-    description: "Provides leadership and represents the association.",
-    candidates: [
-      { id: "p1", name: "Candidate One", department: "Department / Level", initials: "C1", manifesto: "Candidate biography and manifesto will appear here once supplied." },
-      { id: "p2", name: "Candidate Two", department: "Department / Level", initials: "C2", manifesto: "Candidate biography and manifesto will appear here once supplied." }
-    ]
-  },
-  {
-    id: "vice-president",
-    title: "Vice President",
-    description: "Supports the president and coordinates assigned responsibilities.",
-    candidates: [
-      { id: "vp1", name: "Candidate Three", department: "Department / Level", initials: "C3", manifesto: "Candidate biography and manifesto will appear here once supplied." },
-      { id: "vp2", name: "Candidate Four", department: "Department / Level", initials: "C4", manifesto: "Candidate biography and manifesto will appear here once supplied." }
-    ]
-  },
-  {
-    id: "secretary-general",
-    title: "Secretary General",
-    description: "Coordinates records, correspondence and association documentation.",
-    candidates: [
-      { id: "sg1", name: "Candidate Five", department: "Department / Level", initials: "C5", manifesto: "Candidate biography and manifesto will appear here once supplied." },
-      { id: "sg2", name: "Candidate Six", department: "Department / Level", initials: "C6", manifesto: "Candidate biography and manifesto will appear here once supplied." }
-    ]
-  },
-  {
-    id: "financial-secretary",
-    title: "Financial Secretary",
-    description: "Maintains financial records and supports transparent reporting.",
-    candidates: [
-      { id: "fs1", name: "Candidate Seven", department: "Department / Level", initials: "C7", manifesto: "Candidate biography and manifesto will appear here once supplied." },
-      { id: "fs2", name: "Candidate Eight", department: "Department / Level", initials: "C8", manifesto: "Candidate biography and manifesto will appear here once supplied." }
-    ]
-  }
+// Position titles transcribed from the NAMES UNIBEN ELECO 2026/2027
+// nomination notice dated 30/10/2026.
+// This is an OFFICE CATALOGUE, not the approved candidate list.
+// The live backend must supply the official positions and candidates.
+export const electionOfficeCatalogue = [
+  { id: 'president', title: 'President', scope: 'general' },
+  { id: 'vice-president', title: 'Vice President', scope: 'department' },
+  { id: 'secretary-general', title: 'Secretary General', scope: 'general' },
+  { id: 'assistant-secretary-general', title: 'Assistant Secretary General', scope: 'general' },
+  { id: 'public-relations-officer', title: 'Public Relations Officer', scope: 'general' },
+  { id: 'assistant-pro', title: 'Assistant PRO', scope: 'general' },
+  { id: 'director-of-finance', title: 'Director of Finance', scope: 'general' },
+  { id: 'director-of-social', title: 'Director of Social', scope: 'general' },
+  { id: 'director-of-welfare', title: 'Director of Welfare', scope: 'general' },
+  { id: 'director-of-sports', title: 'Director of Sports', scope: 'general' },
 ];
+
+export const departmentVPOffices = {
+  'Mechanical Engineering': 'MEE',
+  'Marine Engineering': 'MRE',
+  'Mechatronics Engineering': 'MTE',
+};

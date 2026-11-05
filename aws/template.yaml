@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: NAMES UNIBEN election API; deploy only after independent approval and testing.
+Parameters:
+  FrontendOrigin:
+    Type: String
+    Description: Frontend website origin without path or trailing slash, for CORS
+  FrontendUrl:
+    Type: String
+    Description: Exact voter website URL including final slash (e.g. https://your-app.amplifyapp.com/)
+  GoogleOAuthSecretArn:
+    Type: String
+    Description: Existing Secrets Manager ARN, JSON object with clientId and clientSecret
+  OtpPepperSecretArn:
+    Type: String
+    Description: Existing Secrets Manager ARN, JSON object with pepper
+  SesFromEmail:
+    Type: String
+    Description: SES verified FROM email. SES production access must be approved.
+  SesIdentityArn:
+    Type: String
+    Description: SES verified identity ARN for least-privilege email sending
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15
+Resources:
+  ElectionHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 120
+        ThrottlingRateLimit: 60
+      CorsConfiguration:
+        AllowOrigins: [!Ref FrontendOrigin]
+        AllowMethods: ['GET','POST','OPTIONS']
+        AllowHeaders: ['Content-Type','Authorization']
+        MaxAge: 3600
+  VotersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+        - { AttributeName: institutionalEmail, AttributeType: S }
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema: [{ AttributeName: institutionalEmail, KeyType: HASH }]
+          Projection: { ProjectionType: ALL }
+  BallotsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      AttributeDefinitions: [{ AttributeName: ballotId, AttributeType: S }]
+      KeySchema: [{ AttributeName: ballotId, KeyType: HASH }]
+  EphemeralTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: key, AttributeType: S }]
+      KeySchema: [{ AttributeName: key, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: expiresAt, Enabled: true }
+  ElectionConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+  ElectionApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/handler.handler
+      Environment:
+        Variables:
+          VOTERS_TABLE: !Ref VotersTable
+          BALLOTS_TABLE: !Ref BallotsTable
+          EPHEMERAL_TABLE: !Ref EphemeralTable
+          CONFIG_TABLE: !Ref ElectionConfigTable
+          FRONTEND_URL: !Ref FrontendUrl
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+          OTP_PEPPER_SECRET_ARN: !Ref OtpPepperSecretArn
+          SES_FROM_EMAIL: !Ref SesFromEmail
+          API_URL: !Sub 'https://${ElectionHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:TransactWriteItems]
+              Resource: [!GetAtt VotersTable.Arn, !Sub '${VotersTable.Arn}/index/EmailIndex']
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:TransactWriteItems]
+              Resource: !GetAtt BallotsTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
+              Resource: !GetAtt EphemeralTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:TransactWriteItems]
+              Resource: !GetAtt ElectionConfigTable.Arn
+            - Effect: Allow
+              Action: [secretsmanager:GetSecretValue]
+              Resource: [!Ref GoogleOAuthSecretArn, !Ref OtpPepperSecretArn]
+            - Effect: Allow
+              Action: [ses:SendEmail]
+              Resource: !Ref SesIdentityArn
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ElectionHttpApi
+            Path: /{proxy+}
+            Method: ANY
+Outputs:
+  ApiUrl: { Value: !Sub 'https://${ElectionHttpApi}.execute-api.${AWS::Region}.amazonaws.com' }
+  VotersTableName: { Value: !Ref VotersTable }
+  ConfigTableName: { Value: !Ref ElectionConfigTable }
+  BallotsTableName: { Value: !Ref BallotsTable }
+  EphemeralTableName: { Value: !Ref EphemeralTable }

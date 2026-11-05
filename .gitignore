@@ -5,3 +5,14 @@ dist/
 .env.*.local
 .DS_Store
 *.log
+# Never commit voter exports, personal details, AWS secrets or ballots
+aws/.env*
+aws/approved-*.json
+aws/approved-*.csv
+aws/private/
+aws/.aws-sam/
+*.pem
+*.key
+*.p12
+*student*register*.csv
+*voter*export*.csv

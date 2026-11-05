@@ -1,7 +1,9 @@
+import { electionOfficeCatalogue, departmentVPOffices } from '../data.js';
+
 // Synthetic preview data ONLY. Never use this for a real election.
 export const previewElection = {
   id: 'names-preview-2026',
-  title: 'NAMES UNIBEN Election 2026',
+  title: 'NAMES UNIBEN Election 2026/2027',
   subtitle: 'National Association of Mechanical, Mechatronics and Marine Engineering Students',
   status: 'open',
   notice: 'Illustrative election preview — no votes are recorded.',
@@ -14,35 +16,45 @@ export const previewVoters = [
   { id: 'demo-100', fullName: 'Demo 100-Level Student', department: 'Marine Engineering', level: 100, identifier: 'DEMO-UB-100', identifierType: 'registration', hasVoted: false },
 ];
 
-const general = [
-  { id: 'president', title: 'President', scope: 'general', candidates: [{id:'pres-1',name:'Demo Candidate A',department:'Mechanical Engineering',tagline:'Candidate information will be supplied by ELECO.'},{id:'pres-2',name:'Demo Candidate B',department:'Marine Engineering',tagline:'Candidate information will be supplied by ELECO.'}] },
-  { id: 'general-secretary', title: 'General Secretary', scope: 'general', candidates: [{id:'sec-1',name:'Demo Candidate C',department:'Mechatronics Engineering'},{id:'sec-2',name:'Demo Candidate D',department:'Mechanical Engineering'}] },
-  { id: 'pro', title: 'Public Relations Officer', scope: 'general', candidates: [{id:'pro-1',name:'Demo Candidate E',department:'Marine Engineering'},{id:'pro-2',name:'Demo Candidate F',department:'Mechanical Engineering'}] },
-];
-const vicePresidents = {
-  'Marine Engineering': [
-    {id:'vp-mar-1',name:'Marine VP Demo A',department:'Marine Engineering'},
-    {id:'vp-mar-2',name:'Marine VP Demo B',department:'Marine Engineering'},
-  ],
-  'Mechanical Engineering': [
-    {id:'vp-mec-1',name:'Mechanical VP Demo A',department:'Mechanical Engineering'},
-    {id:'vp-mec-2',name:'Mechanical VP Demo B',department:'Mechanical Engineering'},
-  ],
-  'Mechatronics Engineering': [
-    {id:'vp-mct-1',name:'Mechatronics VP Demo A',department:'Mechatronics Engineering'},
-    {id:'vp-mct-2',name:'Mechatronics VP Demo B',department:'Mechatronics Engineering'},
-  ],
-};
+// Every preview student receives the same 9 association-wide offices,
+// plus exactly one VP office for their VERIFIED department.
+
+const previewGeneralPositions = electionOfficeCatalogue
+  .filter(office => office.scope === 'general')
+  .map(office => ({
+    ...office,
+    candidates: [
+      { id: `${office.id}-demo-a`, name: 'Demo Candidate A', department: 'Illustrative candidate', tagline: 'Placeholder only — ELECO must provide the approved candidates.' },
+      { id: `${office.id}-demo-b`, name: 'Demo Candidate B', department: 'Illustrative candidate', tagline: 'Placeholder only — ELECO must provide the approved candidates.' }
+    ]
+  }));
+
+function departmentVPPosition(department) {
+  const departmentCode = departmentVPOffices[department];
+  if (!departmentCode) throw new Error('Unrecognised department in preview voter record.');
+  return {
+    id: `vice-president-${departmentCode.toLowerCase()}`,
+    title: `Vice President — ${department}`,
+    scope: 'department',
+    department,
+    candidates: [
+      { id: `vp-${departmentCode.toLowerCase()}-demo-a`, name: 'Demo VP Candidate A', department, tagline: 'Placeholder only — approved candidates pending.' },
+      { id: `vp-${departmentCode.toLowerCase()}-demo-b`, name: 'Demo VP Candidate B', department, tagline: 'Placeholder only — approved candidates pending.' }
+    ]
+  };
+}
+
 export function makePreviewBallot(voter) {
+  if (!voter?.department) throw new Error('A verified student department is required.');
+  const vp = departmentVPPosition(voter.department);
+  const positions = electionOfficeCatalogue.map(office =>
+    office.scope === 'department'
+      ? vp
+      : previewGeneralPositions.find(position => position.id === office.id)
+  );
   return {
     election: previewElection,
-    voter: {...voter},
-    positions: [...general, {
-      id: `vice-president-${voter.department.toLowerCase().replace(/\s+/g, '-')}`,
-      title: `Vice President — ${voter.department}`,
-      scope: 'department',
-      department: voter.department,
-      candidates: vicePresidents[voter.department] || [],
-    }],
+    voter: { ...voter },
+    positions
   };
 }

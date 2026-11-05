@@ -1,0 +1,22 @@
+{
+  "name": "@vaultr/names-election-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint:syntax": "node --check src/handler.mjs && node --check src/rules.mjs && node --check scripts/import-voters.mjs && node --check scripts/import-election.mjs && node --check scripts/summary.mjs",
+    "import:voters": "node scripts/import-voters.mjs",
+    "import:election": "node scripts/import-election.mjs",
+    "summary": "node scripts/summary.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.900.0",
+    "@aws-sdk/client-secrets-manager": "^3.900.0",
+    "@aws-sdk/client-sesv2": "^3.900.0",
+    "@aws-sdk/lib-dynamodb": "^3.900.0",
+    "csv-parse": "^6.1.0",
+    "google-auth-library": "^10.0.0"
+  },
+  "engines": { "node": ">=22" }
+}

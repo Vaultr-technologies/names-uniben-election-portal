@@ -1,0 +1,21 @@
+import {DynamoDBClient} from '@aws-sdk/client-dynamodb';
+import {DynamoDBDocumentClient,GetCommand,UpdateCommand} from '@aws-sdk/lib-dynamodb';
+import {getStatus,validateElection} from '../src/rules.mjs';
+const args=process.argv.slice(2);
+const desired=args.includes('--open')?'open':args.includes('--close')?'closed':null;
+if(!desired)throw Error('Usage: CONFIG_TABLE=<table> node scripts/set-status.mjs --open|--close --approved-by "ELECO signatory" --apply');
+const approver=args.find((a,i)=>args[i-1]==='--approved-by');
+if(!approver || approver.length<3)throw Error('Document authorised ELECO signatory with --approved-by');
+if(!process.env.CONFIG_TABLE)throw Error('Missing CONFIG_TABLE');
+const db=DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const row=(await db.send(new GetCommand({TableName:process.env.CONFIG_TABLE,Key:{id:'ELECTION'},ConsistentRead:true}))).Item;
+if(!row)throw Error('No election imported');
+validateElection(row);
+const expected=desired==='open'?'draft':'open';
+if(row.status!==expected)throw Error(`Only ${expected} can transition to ${desired}`);
+const stateNow=getStatus({...row,status:'open'});
+if(desired==='open' && stateNow==='closed')throw Error('Election window already ended');
+console.log(`Proposed transition ${expected} -> ${desired}; authorised by ${approver}. Current schedule status: ${stateNow}.`);
+if(!args.includes('--apply')){console.log('DRY RUN ONLY');process.exit(0);}
+await db.send(new UpdateCommand({TableName:process.env.CONFIG_TABLE,Key:{id:'ELECTION'},UpdateExpression:'SET #s=:newStatus, lastApprovedBy=:who, lastStatusChangedAt=:at',ConditionExpression:'#s=:oldStatus',ExpressionAttributeNames:{'#s':'status'},ExpressionAttributeValues:{':newStatus':desired,':oldStatus':expected,':who':approver,':at':new Date().toISOString()}}));
+console.log('Status updated. Change is not independent proof of authorisation; preserve committee written sign-off.');
