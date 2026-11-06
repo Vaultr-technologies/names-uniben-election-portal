@@ -9,6 +9,7 @@ import namesLogo from './assets/names-logo.jpg';
 import unibenLogo from './assets/uniben-logo.png';
 import { previewVoters } from './lib/demo';
 import SituationRoom from './SituationRoom.jsx';
+import AdminPanel from './AdminPanel.jsx';
 import {
   API_CONFIGURED, DEMO_MODE, ApiError, castVote, exchangeGoogleCode,
   getBallot, getElection, getGoogleLoginUrl, getMe, getVoteStatus, logout,
@@ -138,7 +139,7 @@ function HelpModal({onClose}) {
   ].map(([no,title,desc])=><div className="help-step" key={no}><span>{no}</span><div><strong>{title}</strong><p>{desc}</p></div></div>)}<InfoBox>Only the Electoral Committee may resolve disputed or incorrect student records. Do not share OTPs or passwords with anyone.</InfoBox><button className="btn btn-primary btn-full" onClick={onClose}>Understood <Check size={16}/></button></section></div>;
 }
 export default function App() {
-  const [page,setPage]=useState(()=>window.location.hash==='#situation-room'?'situation':'home');
+  const [page,setPage]=useState(()=>window.location.hash==='#situation-room'?'situation':(window.location.hash==='#admin'||new URLSearchParams(window.location.search).has('code')||new URLSearchParams(window.location.search).has('error'))?'admin':'home');
   const [election,setElection]=useState(null);
   const [loadingElection,setLoadingElection]=useState(true);
   const [electionError,setElectionError]=useState('');
@@ -157,15 +158,16 @@ export default function App() {
   const idempotencyKey=useRef('');
   const navigate=useCallback(next=>{
     setError('');setPage(next);
-    if(next==='situation'){
-      if(window.location.hash!=='#situation-room')window.history.replaceState(null,'',window.location.pathname+window.location.search+'#situation-room');
-    }else if(window.location.hash==='#situation-room'){
+    if(next==='situation'||next==='admin'){
+      const route=next==='situation'?'#situation-room':'#admin';
+      if(window.location.hash!==route)window.history.replaceState(null,'',window.location.pathname+window.location.search+route);
+    }else if(window.location.hash==='#situation-room'||window.location.hash==='#admin'){
       window.history.replaceState(null,'',window.location.pathname+window.location.search);
     }
     window.scrollTo({top:0,behavior:'smooth'});
   },[]);
   useEffect(()=>{
-    const onHash=()=>{if(window.location.hash==='#situation-room')setPage('situation');};
+    const onHash=()=>{if(window.location.hash==='#situation-room')setPage('situation');else if(window.location.hash==='#admin')setPage('admin');};
     window.addEventListener('hashchange',onHash);
     return()=>window.removeEventListener('hashchange',onHash);
   },[]);
@@ -253,6 +255,7 @@ export default function App() {
   return <Shell page={effectivePage} setPage={navigate} election={election} session={protectedPage} onSignOut={handleSignout} openHelp={()=>setShowHelp(true)}>
     {effectivePage==='home'&&<Home election={election} loading={loadingElection} loadError={electionError} onStart={()=>navigate('login')} onSituation={()=>navigate('situation')} openHelp={()=>setShowHelp(true)}/>}
     {effectivePage==='situation'&&<SituationRoom onBack={()=>navigate('home')}/>}
+    {effectivePage==='admin'&&<AdminPanel onBack={()=>navigate('home')}/>}
     {effectivePage==='login'&&<Login onBack={goHome} onDemoSignIn={onDemoSignIn} onAuth={onAuthenticated} error={error} setError={setError}/>}
     {effectivePage==='dashboard'&&voter&&<Dashboard voter={voter} election={election} onBallot={startBallot} onSignOut={handleSignout} working={busy} error={error}/>}
     {effectivePage==='ballot'&&ballot&&<Ballot ballot={ballot} choices={choices} setChoices={setChoices} index={positionIndex} setIndex={setPositionIndex} onReview={reviewBallot} onDashboard={()=>navigate('dashboard')} error={error}/>}

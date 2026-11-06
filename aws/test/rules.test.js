@@ -36,3 +36,10 @@ test('configuration requires candidate review; placeholders rejected',()=>{
  const valid=JSON.parse(JSON.stringify(config));assert.equal(validateElection(valid),true);
  valid.positions[0].candidates[0].name='Demo Candidate A';assert.throws(()=>validateElection(valid));
 });
+
+test('cannot change a department VP title or map without being rejected at import',()=>{
+ const forged=JSON.parse(JSON.stringify(config));
+ const target=forged.positions.find(p=>p.scope==='department');
+ target.title='Vice President — Another Department';
+ assert.throws(()=>validateElection(forged),/Incorrect department VP/);
+});

@@ -20,6 +20,12 @@ Parameters:
   SesIdentityArn:
     Type: String
     Description: SES verified identity ARN for least-privilege email sending
+  AdminDomainPrefix:
+    Type: String
+    MinLength: 8
+    MaxLength: 63
+    AllowedPattern: '[a-z0-9-]+'
+    Description: Globally unique Cognito hosted-login prefix for authenticated ELECO management
 Globals:
   Function:
     Runtime: nodejs22.x
@@ -31,14 +37,80 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: '$default'
+      Auth:
+        Authorizers:
+          ElectionManagersJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}'
+              audience: [!Ref AdminUserPoolClient]
       DefaultRouteSettings:
         ThrottlingBurstLimit: 120
         ThrottlingRateLimit: 60
       CorsConfiguration:
         AllowOrigins: [!Ref FrontendOrigin]
-        AllowMethods: ['GET','POST','OPTIONS']
+        AllowMethods: ['GET','POST','PUT','OPTIONS']
         AllowHeaders: ['Content-Type','Authorization']
         MaxAge: 3600
+  AdminUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-eleco-admin'
+      UserPoolTier: LITE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      MfaConfiguration: 'ON'
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      SoftwareTokenMfaConfiguration:
+        Enabled: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+  AdminUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref AdminUserPool
+      ClientName: names-eleco-admin-web
+      GenerateSecret: false
+      SupportedIdentityProviders: [COGNITO]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid,email]
+      CallbackURLs: [!Ref FrontendUrl]
+      LogoutURLs: [!Ref FrontendUrl]
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 60
+      TokenValidityUnits: { AccessToken: minutes }
+  AdminUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref AdminDomainPrefix
+      ManagedLoginVersion: 1
+      UserPoolId: !Ref AdminUserPool
+  ElectionManagersGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref AdminUserPool
+      GroupName: ElectionManagers
+      Description: Approved users who may manage election candidate drafts
+  AdminAuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      AttributeDefinitions: [{ AttributeName: eventId, AttributeType: S }]
+      KeySchema: [{ AttributeName: eventId, KeyType: HASH }]
   VotersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -128,6 +200,43 @@ Resources:
             ApiId: !Ref ElectionHttpApi
             Path: /{proxy+}
             Method: ANY
+  AdminCandidatesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/admin.handler
+      MemorySize: 256
+      Timeout: 12
+      Environment:
+        Variables:
+          CONFIG_TABLE: !Ref ElectionConfigTable
+          ADMIN_AUDIT_TABLE: !Ref AdminAuditTable
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:ConditionCheckItem, dynamodb:TransactWriteItems]
+              Resource: !GetAtt ElectionConfigTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:TransactWriteItems]
+              Resource: !GetAtt AdminAuditTable.Arn
+      Events:
+        AdminRead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ElectionHttpApi
+            Path: /admin/candidates
+            Method: GET
+            Auth:
+              Authorizer: ElectionManagersJwt
+        AdminWrite:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ElectionHttpApi
+            Path: /admin/candidates
+            Method: PUT
+            Auth:
+              Authorizer: ElectionManagersJwt
   ProvisionalResultsPublisher:
     Type: AWS::Serverless::Function
     Properties:
@@ -166,3 +275,7 @@ Outputs:
   BallotsTableName: { Value: !Ref BallotsTable }
   EphemeralTableName: { Value: !Ref EphemeralTable }
   PublishedResultsTableName: { Value: !Ref PublishedResultsTable }
+  AdminUserPoolId: { Value: !Ref AdminUserPool }
+  AdminAppClientId: { Value: !Ref AdminUserPoolClient }
+  AdminCognitoDomain: { Value: !Sub 'https://${AdminDomainPrefix}.auth.${AWS::Region}.amazoncognito.com' }
+  AdminAuditTableName: { Value: !Ref AdminAuditTable }

@@ -64,6 +64,18 @@ export function validateElection(config) {
   const expectedGeneral = OFFICES.filter(p => p[0]!=='vice-president').map(p=>p[0]);
   if (general.length !== expectedGeneral.length || !expectedGeneral.every(id => general.some(p=>p.id===id))) throw new Error('All nine general offices are required');
   if (vp.length !== 3 || !Object.keys(DEPARTMENTS).every(d => vp.some(p=>p.id === `vice-president-${DEPARTMENTS[d].toLowerCase()}` && p.department === d))) throw new Error('Each department must have exactly one VP contest');
+  // Election imports must not reassign offices or departmental VP eligibility.
+  for(const [id,title] of OFFICES){
+    if(id==='vice-president'){
+      for(const [department,short] of Object.entries(DEPARTMENTS)){
+        const p=vp.find(v=>v.id===`vice-president-${short.toLowerCase()}`);
+        if(!p || p.title!==`Vice President — ${department}` || p.department!==department)throw new Error('Incorrect department VP definition');
+      }
+    }else{
+      const p=general.find(v=>v.id===id);
+      if(!p || p.title!==title || p.department)throw new Error('Incorrect association-wide office definition');
+    }
+  }
   const positionIds = new Set();
   const candidateIds = new Set();
   for (const p of config.positions) {

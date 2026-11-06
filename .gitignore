@@ -16,3 +16,9 @@ aws/.aws-sam/
 *.p12
 *student*register*.csv
 *voter*export*.csv
+
+# Additional private intake and management exports
+private/
+aws/private/
+*forms*responses*.csv
+*100l-pending*.csv

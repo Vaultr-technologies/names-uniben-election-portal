@@ -1,3 +1,5 @@
+**New in v6:** [ELECTION-MANAGEMENT.md](ELECTION-MANAGEMENT.md) explains the Cognito-protected candidate editor and the 100-level Google Forms intake converter. The Situation Room remains public and read-only.
+
 **Situation room added:** Read [SITUATION-ROOM.md](SITUATION-ROOM.md) before deploying or showing election results.
 
 # Quick start — for Vaultr (you and Chinedu)

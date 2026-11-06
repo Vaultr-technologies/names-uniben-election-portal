@@ -1,3 +1,5 @@
+**v6:** Candidate draft editing now has a separate Cognito-protected admin API and audit table. See [../ELECTION-MANAGEMENT.md](../ELECTION-MANAGEMENT.md). Google Forms 100L data can be converted into *pending-only* records with `npm run prepare:100l`.
+
 **Added in v5:** `GET /public/situation`, sharded accepted-ballot counters, an AWS scheduled provisional-results publisher, and `scripts/finalize-register.mjs`. Read [../SITUATION-ROOM.md](../SITUATION-ROOM.md) before deployment.
 
 # NAMES Election AWS API — implementation guide

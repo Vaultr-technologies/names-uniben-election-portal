@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "lint:syntax": "node --check src/handler.mjs && node --check src/rules.mjs && node --check scripts/import-voters.mjs && node --check scripts/import-election.mjs && node --check scripts/summary.mjs && node --check src/publish.mjs && node --check src/situation.mjs && node --check scripts/finalize-register.mjs",
+    "lint:syntax": "node --check src/handler.mjs && node --check src/rules.mjs && node --check scripts/import-voters.mjs && node --check scripts/import-election.mjs && node --check scripts/summary.mjs && node --check src/publish.mjs && node --check src/situation.mjs && node --check scripts/finalize-register.mjs && node --check src/admin.mjs && node --check src/admin-rules.mjs && node --check src/intake.mjs && node --check scripts/prepare-100l.mjs && node --check scripts/assemble-election.mjs",
     "import:voters": "node scripts/import-voters.mjs",
     "import:election": "node scripts/import-election.mjs",
     "summary": "node scripts/summary.mjs",
+    "prepare:100l": "node scripts/prepare-100l.mjs",
+    "assemble:election": "node scripts/assemble-election.mjs",
     "finalize:register": "node scripts/finalize-register.mjs"
   },
   "dependencies": {
