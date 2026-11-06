@@ -1,3 +1,5 @@
+**Added in v5:** `GET /public/situation`, sharded accepted-ballot counters, an AWS scheduled provisional-results publisher, and `scripts/finalize-register.mjs`. Read [../SITUATION-ROOM.md](../SITUATION-ROOM.md) before deployment.
+
 # NAMES Election AWS API — implementation guide
 
 ## API contract (front-end already integrated)

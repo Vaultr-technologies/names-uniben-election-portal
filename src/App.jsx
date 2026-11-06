@@ -8,6 +8,7 @@ import {
 import namesLogo from './assets/names-logo.jpg';
 import unibenLogo from './assets/uniben-logo.png';
 import { previewVoters } from './lib/demo';
+import SituationRoom from './SituationRoom.jsx';
 import {
   API_CONFIGURED, DEMO_MODE, ApiError, castVote, exchangeGoogleCode,
   getBallot, getElection, getGoogleLoginUrl, getMe, getVoteStatus, logout,
@@ -47,6 +48,7 @@ function Shell({children, page, setPage, election, session, onSignOut, openHelp}
       <nav className={`site-nav ${menuOpen?'expanded':''}`} aria-label="Primary navigation">
         <button onClick={()=>go(session?'dashboard':'home')}>{session?'My dashboard':'Home'}</button>
         <button onClick={()=>{openHelp();setMenuOpen(false);}}>How to vote</button>
+        <button className={page==='situation'?'nav-active':''} onClick={()=>go('situation')}>Situation room</button>
         {session ? <button className="nav-link-cta" onClick={()=>{setMenuOpen(false);onSignOut();}}>Sign out <LogOut size={15}/></button> : <button className="nav-link-cta" onClick={()=>go('login')}>Access ballot <ArrowRight size={15}/></button>}
       </nav>
       <button type="button" className="mobile-menu" onClick={()=>setMenuOpen(s=>!s)} aria-label="Toggle navigation" aria-expanded={menuOpen}>{menuOpen?<X size={21}/>:<Menu size={21}/>}</button>
@@ -59,13 +61,13 @@ function Shell({children, page, setPage, election, session, onSignOut, openHelp}
 function FlowProgress({active}) {
   return <div className="flow-progress" aria-label="Voting steps">{processSteps.map((step,i)=><div className={`flow-item ${i===active?'current':i<active?'complete':''}`} key={step}><span className="flow-num">{i<active?<Check size={13}/>:i+1}</span><span className="flow-name">{step}</span></div>)}</div>;
 }
-function Home({onStart,openHelp,election,loading,loadError}) {
+function Home({onStart,openHelp,onSituation,election,loading,loadError}) {
   const ready = election?.status === 'open';
   return <main>
     <section className="hero"><div className="hero-copy"><div className="overline"><span className="overline-dot"/>NAMES UNIBEN • 2026/2027 ELECTION</div>
       <h1>Your voice.<br/><em>Your choice.</em><br/>Our future.</h1>
       <p>The official digital election portal for the National Association of Mechanical, Mechatronics and Marine Engineering Students, University of Benin.</p>
-      <div className="hero-buttons"><button className="btn btn-primary" disabled={!ready||loading} onClick={onStart}>{loading?'Checking election…':ready?'Proceed to vote':'Voting not yet available'} <ArrowRight size={18}/></button><button className="btn btn-text" onClick={openHelp}><HelpCircle size={18}/> How voting works</button></div>
+      <div className="hero-buttons"><button className="btn btn-primary" disabled={!ready||loading} onClick={onStart}>{loading?'Checking election…':ready?'Proceed to vote':'Voting not yet available'} <ArrowRight size={18}/></button><button className="btn btn-text" onClick={openHelp}><HelpCircle size={18}/> How voting works</button><button className="btn btn-text" onClick={onSituation}><Globe2 size={17}/> Situation room</button></div>
       {loadError && <InfoBox kind="error">The election service is not connected. Voting is unavailable until the secure backend is online.</InfoBox>}
       {!loadError && election?.status === 'upcoming' && <InfoBox>Voting has not opened yet. Return during the scheduled election window.</InfoBox>}
       {!loadError && election?.status === 'closed' && <InfoBox>Voting has ended. Official results will be published by the Electoral Committee.</InfoBox>}
@@ -136,7 +138,7 @@ function HelpModal({onClose}) {
   ].map(([no,title,desc])=><div className="help-step" key={no}><span>{no}</span><div><strong>{title}</strong><p>{desc}</p></div></div>)}<InfoBox>Only the Electoral Committee may resolve disputed or incorrect student records. Do not share OTPs or passwords with anyone.</InfoBox><button className="btn btn-primary btn-full" onClick={onClose}>Understood <Check size={16}/></button></section></div>;
 }
 export default function App() {
-  const [page,setPage]=useState('home');
+  const [page,setPage]=useState(()=>window.location.hash==='#situation-room'?'situation':'home');
   const [election,setElection]=useState(null);
   const [loadingElection,setLoadingElection]=useState(true);
   const [electionError,setElectionError]=useState('');
@@ -153,7 +155,20 @@ export default function App() {
   const [showHelp,setShowHelp]=useState(false);
   const oauthProcessed=useRef(false);
   const idempotencyKey=useRef('');
-  const navigate=useCallback(next=>{setError('');setPage(next);window.scrollTo({top:0,behavior:'smooth'});},[]);
+  const navigate=useCallback(next=>{
+    setError('');setPage(next);
+    if(next==='situation'){
+      if(window.location.hash!=='#situation-room')window.history.replaceState(null,'',window.location.pathname+window.location.search+'#situation-room');
+    }else if(window.location.hash==='#situation-room'){
+      window.history.replaceState(null,'',window.location.pathname+window.location.search);
+    }
+    window.scrollTo({top:0,behavior:'smooth'});
+  },[]);
+  useEffect(()=>{
+    const onHash=()=>{if(window.location.hash==='#situation-room')setPage('situation');};
+    window.addEventListener('hashchange',onHash);
+    return()=>window.removeEventListener('hashchange',onHash);
+  },[]);
   const goHome=()=>navigate('home');
 
   useEffect(()=>{
@@ -236,7 +251,8 @@ export default function App() {
   const protectedPage=Boolean(accessToken&&voter);
   const effectivePage = !protectedPage && ['dashboard','ballot','review','success'].includes(page)?'login':page;
   return <Shell page={effectivePage} setPage={navigate} election={election} session={protectedPage} onSignOut={handleSignout} openHelp={()=>setShowHelp(true)}>
-    {effectivePage==='home'&&<Home election={election} loading={loadingElection} loadError={electionError} onStart={()=>navigate('login')} openHelp={()=>setShowHelp(true)}/>}
+    {effectivePage==='home'&&<Home election={election} loading={loadingElection} loadError={electionError} onStart={()=>navigate('login')} onSituation={()=>navigate('situation')} openHelp={()=>setShowHelp(true)}/>}
+    {effectivePage==='situation'&&<SituationRoom onBack={()=>navigate('home')}/>}
     {effectivePage==='login'&&<Login onBack={goHome} onDemoSignIn={onDemoSignIn} onAuth={onAuthenticated} error={error} setError={setError}/>}
     {effectivePage==='dashboard'&&voter&&<Dashboard voter={voter} election={election} onBallot={startBallot} onSignOut={handleSignout} working={busy} error={error}/>}
     {effectivePage==='ballot'&&ballot&&<Ballot ballot={ballot} choices={choices} setChoices={setChoices} index={positionIndex} setIndex={setPositionIndex} onReview={reviewBallot} onDashboard={()=>navigate('dashboard')} error={error}/>}

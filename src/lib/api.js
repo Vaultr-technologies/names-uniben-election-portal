@@ -120,3 +120,14 @@ export async function previewSignIn(voterId) {
   localSessions.set(accessToken, {...voter});
   return { accessToken, voter: {...voter} };
 }
+
+// Read-only public observer endpoint. It never returns students, ballots or
+// candidate totals while the election is open.
+export async function getSituation({ signal, previewStage='open' } = {}) {
+  if (DEMO_MODE) {
+    const { previewSituation } = await import('./situation-demo.js');
+    await sleep(180);
+    return previewSituation(previewStage);
+  }
+  return request('/public/situation', { signal });
+}

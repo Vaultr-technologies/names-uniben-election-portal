@@ -73,6 +73,13 @@ Resources:
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
       AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
       KeySchema: [{ AttributeName: id, KeyType: HASH }]
+  PublishedResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
   ElectionApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -84,6 +91,7 @@ Resources:
           BALLOTS_TABLE: !Ref BallotsTable
           EPHEMERAL_TABLE: !Ref EphemeralTable
           CONFIG_TABLE: !Ref ElectionConfigTable
+          PUBLICATION_TABLE: !Ref PublishedResultsTable
           FRONTEND_URL: !Ref FrontendUrl
           FRONTEND_ORIGIN: !Ref FrontendOrigin
           GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
@@ -102,8 +110,11 @@ Resources:
               Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
               Resource: !GetAtt EphemeralTable.Arn
             - Effect: Allow
-              Action: [dynamodb:GetItem, dynamodb:TransactWriteItems]
+              Action: [dynamodb:GetItem, dynamodb:BatchGetItem, dynamodb:TransactWriteItems]
               Resource: !GetAtt ElectionConfigTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:GetItem]
+              Resource: !GetAtt PublishedResultsTable.Arn
             - Effect: Allow
               Action: [secretsmanager:GetSecretValue]
               Resource: [!Ref GoogleOAuthSecretArn, !Ref OtpPepperSecretArn]
@@ -117,9 +128,41 @@ Resources:
             ApiId: !Ref ElectionHttpApi
             Path: /{proxy+}
             Method: ANY
+  ProvisionalResultsPublisher:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/publish.handler
+      Timeout: 90
+      MemorySize: 512
+      Environment:
+        Variables:
+          VOTERS_TABLE: !Ref VotersTable
+          BALLOTS_TABLE: !Ref BallotsTable
+          CONFIG_TABLE: !Ref ElectionConfigTable
+          PUBLICATION_TABLE: !Ref PublishedResultsTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:BatchGetItem]
+              Resource: !GetAtt ElectionConfigTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:Scan]
+              Resource: [!GetAtt VotersTable.Arn, !GetAtt BallotsTable.Arn]
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem]
+              Resource: !GetAtt PublishedResultsTable.Arn
+      Events:
+        PeriodicPublicationCheck:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled: true
+            Description: Check for a closed and reconciled election before publishing provisional public totals.
 Outputs:
   ApiUrl: { Value: !Sub 'https://${ElectionHttpApi}.execute-api.${AWS::Region}.amazonaws.com' }
   VotersTableName: { Value: !Ref VotersTable }
   ConfigTableName: { Value: !Ref ElectionConfigTable }
   BallotsTableName: { Value: !Ref BallotsTable }
   EphemeralTableName: { Value: !Ref EphemeralTable }
+  PublishedResultsTableName: { Value: !Ref PublishedResultsTable }

@@ -11,6 +11,7 @@ const db=DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const row=(await db.send(new GetCommand({TableName:process.env.CONFIG_TABLE,Key:{id:'ELECTION'},ConsistentRead:true}))).Item;
 if(!row)throw Error('No election imported');
 validateElection(row);
+if(desired==='open' && (!Number.isSafeInteger(row.eligibleCount)||row.eligibleCount<1))throw Error('Freeze the approved voter register using finalize-register.mjs before opening.');
 const expected=desired==='open'?'draft':'open';
 if(row.status!==expected)throw Error(`Only ${expected} can transition to ${desired}`);
 const stateNow=getStatus({...row,status:'open'});

@@ -1,3 +1,5 @@
+**Situation room added:** Read [SITUATION-ROOM.md](SITUATION-ROOM.md) before deploying or showing election results.
+
 # Quick start — for Vaultr (you and Chinedu)
 
 **What is ready today:** The React frontend is already wired to `src/lib/api.js`; the `aws/` folder adds the matching actual AWS API routes, database models, student authentication flows, ballot validation, and operator import/summary scripts. None of it uses synthetic voter credentials in non-demo mode.

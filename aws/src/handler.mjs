@@ -4,7 +4,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand,
-  DeleteCommand, TransactWriteCommand,
+  DeleteCommand, TransactWriteCommand, BatchGetCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
@@ -12,6 +12,7 @@ import { OAuth2Client } from 'google-auth-library';
 import {
   toVoterKey, normalizeEmail, getStatus, ballotFor, validateSelections,
 } from './rules.mjs';
+import { COUNTER_SHARDS, COUNTER_PREFIX, turnoutCounterKey, countTurnoutShards, makePublicSituation } from './situation.mjs';
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } });
 const ses = new SESv2Client({});
@@ -22,6 +23,7 @@ const T = {
   config: ENV.CONFIG_TABLE,
   ballots: ENV.BALLOTS_TABLE,
   ephemeral: ENV.EPHEMERAL_TABLE,
+  publication: ENV.PUBLICATION_TABLE,
 };
 const secretCache = new Map();
 const epoch = () => Math.floor(Date.now()/1000);
@@ -182,6 +184,24 @@ async function election(){
   if(!config)return asJson(200,{id:'names-uniben',title:'NAMES UNIBEN Elections 2026/2027',status:'upcoming',notice:'The election is being configured.'});
   return asJson(200,{id:config.id,title:config.title,subtitle:config.subtitle,status:getStatus(config),startsAt:config.startsAt,endsAt:config.endsAt,notice:config.notice || ''});
 }
+async function publicSituation(){
+  const config=await getConfig();
+  if(!config)return asJson(200,makePublicSituation(null,null),{'cache-control':'public, max-age=10'});
+  const keys=Array.from({length:COUNTER_SHARDS},(_,i)=>({id:`${COUNTER_PREFIX}${i}`}));
+  let remaining={ [T.config]:{Keys:keys,ConsistentRead:true} };
+  const counters=[];
+  do {
+    const data=await ddb.send(new BatchGetCommand({RequestItems:remaining}));
+    counters.push(...(data.Responses?.[T.config]||[]));
+    remaining=data.UnprocessedKeys;
+  }while(Object.keys(remaining||{}).length);
+  const [publication,state]=await Promise.all([
+    ddb.send(new GetCommand({TableName:T.publication,Key:{id:'RESULTS'},ConsistentRead:true})),
+    ddb.send(new GetCommand({TableName:T.publication,Key:{id:'PUBLICATION_STATE'},ConsistentRead:true})),
+  ]);
+  const payload=makePublicSituation(config,countTurnoutShards(counters),publication.Item,state.Item);
+  return asJson(200,payload,{'cache-control':'public, max-age=10, s-maxage=10'});
+}
 async function ballot(event){
   const auth=await requireSession(event);
   if(!auth)return bad(401,'UNAUTHENTICATED','Please sign in to view your ballot.');
@@ -208,6 +228,7 @@ async function vote(event){
     await ddb.send(new TransactWriteCommand({TransactItems:[
       {Update:{TableName:T.voters,Key:{id:auth.voter.id},UpdateExpression:'SET hasVoted = :true',ConditionExpression:'eligibility = :approved AND (attribute_not_exists(hasVoted) OR hasVoted = :false)',ExpressionAttributeValues:{':true':true,':false':false,':approved':'approved'}}},
       {Put:{TableName:T.ballots,Item:ballotItem,ConditionExpression:'attribute_not_exists(ballotId)'}},
+      {Update:{TableName:T.config,Key:{id:turnoutCounterKey(ballotId)},UpdateExpression:'ADD accepted :one',ExpressionAttributeValues:{':one':1}}},
       {ConditionCheck:{TableName:T.config,Key:{id:'ELECTION'},ConditionExpression:'#status = :open AND startsAt <= :now AND endsAt > :now AND #version = :version',ExpressionAttributeNames:{'#status':'status','#version':'version'},ExpressionAttributeValues:{':open':'open',':now':now,':version':config.version}}},
     ]}));
   } catch(e) {
@@ -236,6 +257,7 @@ export async function handler(event){
   const method=event.requestContext?.http?.method||event.httpMethod||'GET';
   try {
     if(method==='OPTIONS')return {statusCode:204,headers:{...corsHeaders,'cache-control':'no-store'},body:''};
+    if(method==='GET' && path==='/public/situation')return await publicSituation();
     if(method==='GET' && path==='/election')return await election();
     if(method==='GET' && path==='/auth/google/start')return await googleStart();
     if(method==='GET' && path==='/auth/google/callback')return await googleCallback(event);

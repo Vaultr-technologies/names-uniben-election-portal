@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "lint:syntax": "node --check src/handler.mjs && node --check src/rules.mjs && node --check scripts/import-voters.mjs && node --check scripts/import-election.mjs && node --check scripts/summary.mjs",
+    "lint:syntax": "node --check src/handler.mjs && node --check src/rules.mjs && node --check scripts/import-voters.mjs && node --check scripts/import-election.mjs && node --check scripts/summary.mjs && node --check src/publish.mjs && node --check src/situation.mjs && node --check scripts/finalize-register.mjs",
     "import:voters": "node scripts/import-voters.mjs",
     "import:election": "node scripts/import-election.mjs",
-    "summary": "node scripts/summary.mjs"
+    "summary": "node scripts/summary.mjs",
+    "finalize:register": "node scripts/finalize-register.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.900.0",
@@ -18,5 +19,7 @@
     "csv-parse": "^6.1.0",
     "google-auth-library": "^10.0.0"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

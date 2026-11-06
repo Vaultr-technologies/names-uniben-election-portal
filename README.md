@@ -1,3 +1,5 @@
+**New in v5:** Shared read-only situation room and close-only provisional results publication. See [SITUATION-ROOM.md](SITUATION-ROOM.md).
+
 # NAMES UNIBEN Electoral Portal — AWS integration project
 
 Developed by Vaultr Technologies Ltd. · NAMES / UNIBEN 2026–2027
