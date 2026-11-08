@@ -1,0 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
+import { LocalElectionStore } from './store.mjs';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const db = resolve(root, '.local/demo.sqlite');
+const manifest = JSON.parse(readFileSync(resolve(root, 'fixtures/manifest.json'), 'utf8'));
+const voters = JSON.parse(readFileSync(resolve(root, 'fixtures/voters.json'), 'utf8'));
+const store = new LocalElectionStore({ databasePath: db, manifest, voters });
+console.log(JSON.stringify(store.demoResults(), null, 2));
+store.close();

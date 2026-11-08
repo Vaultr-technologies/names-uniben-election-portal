@@ -1,0 +1,11 @@
+{
+  "electionId": "names-uniben-2026-DEMO",
+  "status": "open",
+  "positions": [
+    { "id": "president", "name": "President", "scope": "all", "candidates": [ { "id": "president_a", "name": "Demo Candidate A" }, { "id": "president_b", "name": "Demo Candidate B" } ] },
+    { "id": "secretary", "name": "General Secretary", "scope": "all", "candidates": [ { "id": "secretary_a", "name": "Demo Candidate C" }, { "id": "secretary_b", "name": "Demo Candidate D" } ] },
+    { "id": "vp_mechanical", "name": "VP, Mechanical", "scope": "mechanical", "candidates": [ { "id": "mechanical_a", "name": "Demo Candidate E" }, { "id": "mechanical_b", "name": "Demo Candidate F" } ] },
+    { "id": "vp_mechatronics", "name": "VP, Mechatronics", "scope": "mechatronics", "candidates": [ { "id": "mechatronics_a", "name": "Demo Candidate G" }, { "id": "mechatronics_b", "name": "Demo Candidate H" } ] },
+    { "id": "vp_marine", "name": "VP, Marine", "scope": "marine", "candidates": [ { "id": "marine_a", "name": "Demo Candidate I" }, { "id": "marine_b", "name": "Demo Candidate J" } ] }
+  ]
+}

@@ -1,0 +1,6 @@
+[
+ { "id": "mechanical-demo-001", "department": "mechanical" },
+ { "id": "mechanical-demo-002", "department": "mechanical" },
+ { "id": "mechatronics-demo-001", "department": "mechatronics" },
+ { "id": "marine-demo-001", "department": "marine" }
+]
