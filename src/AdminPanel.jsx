@@ -1,4 +1,4 @@
-import React, {useEffect,useMemo,useRef,useState} from 'react';
+import React, {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,CheckCircle2,ClipboardList,Download,LockKeyhole,LogIn,LogOut,Plus,RefreshCw,Save,ShieldCheck,Trash2,UsersRound} from 'lucide-react';
 import {adminConfigured,adminLogout,adminRequest,finishAdminLogin,startAdminLogin} from './lib/admin-auth.js';
 
@@ -11,6 +11,119 @@ function exportDraft(positions,revision,sha256){
   const a=document.createElement('a');a.href=objectUrl;a.download=`names-eleco-candidates-review-r${revision}.json`;a.click();
   setTimeout(()=>URL.revokeObjectURL(objectUrl),500);
 }
+
+// Uses the protected AWS admin APIs. No local status toggle or direct DynamoDB edits.
+// The Lambda performs the authoritative status, approval, window, and audit checks.
+const approvalPattern = /^[\w .:/#-]{8,120}$/;
+const lagosTime = value => {
+  if (!value || Number.isNaN(Date.parse(value))) return 'Not configured';
+  return new Date(value).toLocaleString('en-NG', {timeZone:'Africa/Lagos',dateStyle:'medium',timeStyle:'short'});
+};
+
+function ElectionControls({token}) {
+  const [election,setElection]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  const [feedback,setFeedback]=useState('');
+  const [pendingAction,setPendingAction]=useState(null);
+  const [approvalReference,setApprovalReference]=useState('');
+  const [confirmation,setConfirmation]=useState('');
+  const [busy,setBusy]=useState(false);
+
+  const refresh=async()=>{
+    setLoading(true);setError('');
+    try { setElection(await adminRequest('/admin/election',token)); }
+    catch(e) { setError(e.message||'Unable to retrieve election status.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(()=>{refresh();},[token]);
+
+  const configured=election?.configured===true;
+  const storedStatus=election?.configuredStatus;
+  const startsAt=Date.parse(election?.startsAt||'');
+  const endsAt=Date.parse(election?.endsAt||'');
+  const inWindow=Number.isFinite(startsAt)&&Number.isFinite(endsAt)&&Date.now()>=startsAt&&Date.now()<endsAt;
+  const hasApprovedRegister=Boolean(election?.registerFinalized && Number.isSafeInteger(election?.eligibleCount) && election.eligibleCount>0);
+  const canOpen=configured && storedStatus==='draft' && hasApprovedRegister && inWindow;
+  // Closing is allowed for an open stored state even if the approved end time has passed.
+  const canClose=configured && storedStatus==='open';
+  const requiredPhrase=pendingAction==='open'?'OPEN ELECTION':'CLOSE ELECTION';
+  const canConfirm=approvalPattern.test(approvalReference.trim()) && confirmation===requiredPhrase;
+  const cancel=()=>{setPendingAction(null);setApprovalReference('');setConfirmation('');};
+  const begin=action=>{
+    if(busy||(action==='open'?!canOpen:!canClose))return;
+    setError('');setFeedback('');setPendingAction(action);setApprovalReference('');setConfirmation('');
+  };
+  const submit=async()=>{
+    if(busy||!pendingAction||!canConfirm||(pendingAction==='open'?!canOpen:!canClose))return;
+    const action=pendingAction;
+    const message=action==='open'
+      ? 'This will enable real voting in the connected AWS environment. Continue only with recorded ELECO approval?'
+      : 'Closing the election is irreversible through this interface. Further votes will be rejected. Continue only with recorded ELECO approval?';
+    if(!window.confirm(message))return;
+    setBusy(true);setError('');setFeedback('');
+    try {
+      const result=await adminRequest(`/admin/election/${action}`,token,{
+        method:'POST',body:{approvalReference:approvalReference.trim(),confirmation:requiredPhrase}
+      });
+      cancel();
+      await refresh();
+      setFeedback(`Election ${result.status==='open'?'opened':'closed'} successfully. An audit entry was recorded by the backend.`);
+    }catch(e){
+      setError(e.message||'Unable to change election status. No change has been confirmed.');
+      await refresh();
+    }finally{setBusy(false);}
+  };
+
+  const statusLabel=!configured?'Not configured':storedStatus==='draft'?'Draft · voting disabled':
+    storedStatus==='open'?(election?.status==='open'?'Voting open':'Voting window ended'):
+    storedStatus==='closed'?'Closed · voting disabled':'Unknown state';
+
+  return <div className="admin-work-card" aria-labelledby="election-controls-title">
+    <div className="admin-card-head">
+      <div>
+        <div className="admin-eyebrow">SECURE ELECTION OPERATIONS</div>
+        <h2 id="election-controls-title">Start / end voting</h2>
+        <p>Controls use audited, Cognito-protected AWS endpoints. The backend, not the browser, decides whether voting is permitted.</p>
+      </div>
+      <button type="button" className="admin-secondary" disabled={busy||loading} onClick={refresh}><RefreshCw size={16}/> Refresh status</button>
+    </div>
+    {loading && <div className="admin-empty" role="status">Checking election status with AWS…</div>}
+    {!loading && election && <>
+      <div className="admin-notice" role="status"><ShieldCheck size={17}/> <strong>{statusLabel}</strong></div>
+      <div className="admin-guide" style={{marginTop:14}}>
+        <p><strong>Approved voting window (WAT):</strong> {lagosTime(election.startsAt)} – {lagosTime(election.endsAt)}</p>
+        <p><strong>Final register:</strong> {election.registerFinalized?'Finalised':'Not finalised'} · <strong>Eligible voters:</strong> {Number.isSafeInteger(election.eligibleCount)?election.eligibleCount:'Not set'}</p>
+        <p><strong>Last status change:</strong> {lagosTime(election.lastStatusChangedAt)}</p>
+      </div>
+      {!configured && <div className="admin-warning"><LockKeyhole size={18}/> No official election configuration has been imported. Starting and closing are unavailable. A candidate draft alone is not the official ballot.</div>}
+      {configured && storedStatus==='draft' && !canOpen && <div className="admin-warning"><LockKeyhole size={18}/> Opening requires a finalised approved register, at least one eligible voter, and the current time to fall within the approved voting window. These conditions are enforced again by AWS.</div>}
+      {configured && storedStatus==='closed' && <div className="admin-notice"><LockKeyhole size={17}/> This election is closed. It cannot be reopened using these controls.</div>}
+      <div className="admin-toolbar" style={{marginTop:16,marginBottom:12}}>
+        <button type="button" className="btn btn-primary" disabled={!canOpen||busy} onClick={()=>begin('open')}><CheckCircle2 size={16}/> Start election</button>
+        <button type="button" className="admin-secondary" disabled={!canClose||busy} onClick={()=>begin('close')}><LockKeyhole size={16}/> End election</button>
+      </div>
+      {pendingAction && <div className="admin-work-card" style={{marginTop:14}}>
+        <h3>{pendingAction==='open'?'Authorise election opening':'Authorise election closure'}</h3>
+        <p>Use a genuine recorded ELECO approval reference. These actions change the connected AWS election state and are logged.</p>
+        <label>ELECO approval reference
+          <input value={approvalReference} maxLength={120} onChange={e=>setApprovalReference(e.target.value)} placeholder="Recorded approval reference (8–120 characters)" autoComplete="off"/>
+        </label>
+        <label>Type <strong>{requiredPhrase}</strong> exactly
+          <input value={confirmation} onChange={e=>setConfirmation(e.target.value)} placeholder={requiredPhrase} autoComplete="off"/>
+        </label>
+        <div className="admin-toolbar" style={{marginTop:12}}>
+          <button type="button" className="btn btn-primary" disabled={!canConfirm||busy||loading} onClick={submit}>{busy?'Submitting…':`Confirm ${pendingAction==='open'?'opening':'closure'}`}</button>
+          <button type="button" className="admin-secondary" disabled={busy} onClick={cancel}>Cancel</button>
+        </div>
+      </div>}
+    </>}
+    {error && <div className="admin-error" role="alert">{error}<button type="button" className="btn btn-text" onClick={refresh}><RefreshCw size={15}/> Retry</button></div>}
+    {feedback && <div className="admin-good" role="status"><CheckCircle2 size={17}/>{feedback}</div>}
+    <p className="admin-note">Before any public launch: verify the official slate and voter register, load test, audit voting-state enforcement, and obtain ELECO's documented approval. This control is not a launch-readiness check.</p>
+  </div>;
+}
+
 export default function AdminPanel({onBack}){
   const [token,setToken]=useState(null);
   const [loading,setLoading]=useState(Boolean(adminConfigured));
@@ -63,7 +176,7 @@ export default function AdminPanel({onBack}){
       <button className="admin-back" onClick={()=>{if(dirty&&!confirm('Discard your unsaved changes?'))return;onBack();}}><ArrowLeft size={15}/> Back to portal</button>
       <div className="overline">VAULTR TECHNOLOGIES · NAMES UNIBEN</div>
       <h1>Election <em>management.</em></h1>
-      <p>Prepare candidate lists for ELECO approval. Nothing saved here changes the live ballot automatically.</p>
+      <p>Prepare candidate lists and manage election status with recorded ELECO approval. Drafts never change the live ballot automatically.</p>
       <div className="admin-badges"><span><ShieldCheck size={15}/> Administrator access required</span><span><LockKeyhole size={15}/> Not a public observer screen</span></div>
     </div>
     {!adminConfigured?<section className="admin-access"><LockKeyhole size={30}/><h2>Management panel not connected</h2><p>The admin Cognito login, client ID, callback URL and AWS API endpoint must be configured in the deployment environment. No candidate records are accessible here yet.</p><code>VITE_ADMIN_COGNITO_DOMAIN · VITE_ADMIN_CLIENT_ID · VITE_ADMIN_REDIRECT_URI · VITE_API_BASE_URL</code></section>
@@ -73,10 +186,12 @@ export default function AdminPanel({onBack}){
         <div className="admin-side-title">MANAGEMENT <button title="Sign out" aria-label="Sign out" onClick={adminLogout}><LogOut size={16}/></button></div>
         <button className={`admin-section ${section==='candidates'?'selected':''}`} onClick={()=>setSection('candidates')}><ClipboardList size={17}/> Candidate drafts</button>
         <button className={`admin-section ${section==='voters'?'selected':''}`} onClick={()=>setSection('voters')}><UsersRound size={17}/> 100-level intake</button>
+        <button className={`admin-section ${section==='election'?'selected':''}`} onClick={()=>setSection('election')}><LockKeyhole size={17}/> Election controls</button>
         {section==='candidates'&&<div className="admin-office-list">{positions.map(p=><button className={p.id===selected?'active':''} key={p.id} onClick={()=>setSelected(p.id)}><span>{p.title}</span><small>{p.candidates?.length||0}</small></button>)}</div>}
       </aside>
       <section className="admin-workspace">
         {loading?<div className="admin-empty">Loading the secured election records…</div>
+        : section==='election'?<ElectionControls token={token}/>
         : loadError&&!draft?<div className="admin-error" role="alert">{loadError}<button className="btn btn-text" onClick={()=>load(token)}><RefreshCw size={15}/> Retry</button></div>
         : section==='voters'?<div className="admin-work-card"><div className="admin-card-head"><h2>100-level intake</h2><span className="admin-tag">Pending verification</span></div><p>Google Form responses are application records, <strong>not verified voters</strong>. Export the responses to CSV and use the private intake converter included with this update. ELECO must match students to the official register and verify their claimed email before marking any record approved.</p><div className="admin-guide"><strong>Safe ingestion workflow</strong><ol><li>Download the private Google Forms CSV to your computer.</li><li>Run the 100L converter locally to produce pending records.</li><li>Review duplicates and reconcile against university records.</li><li>Have an authorised operator import only validated records to the controlled DynamoDB environment.</li></ol></div><p className="admin-note">This screen intentionally does not expose raw student names, registration numbers or email addresses. No records have been imported by visiting this page.</p></div>
         : <>
